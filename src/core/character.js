@@ -110,6 +110,21 @@ export const KEY_SKILLS = [
   '闪避', '格斗：斗殴', '射击：手枪', '急救', '医学', '神秘学', '克苏鲁神话'
 ];
 
+/**
+ * 这个技能能不能在创建角色时手动加点。
+ *
+ * 克苏鲁神话按原版规则不给加：它衡量的是「见过多少不该见的东西」，
+ * 只能靠游戏里的遭遇涨，车卡阶段一律从 0 开始，也不占职业点/兴趣点。
+ *
+ * @param {string} skillName 技能名
+ * @returns {boolean} true 表示可加点
+ */
+export function isSkillEditable(skillName) {
+  const def = SKILL_DEFS.find((d) => d.name === skillName);
+  if (!def) return true;
+  return !def.mythos;
+}
+
 /** 由属性推导的派生值 */
 export function derive(attrs) {
   const STR = attrs.STR ?? 50;

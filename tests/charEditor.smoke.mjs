@@ -100,7 +100,16 @@ function parseInto(html, container) {
     // data-* 属性
     const dataRe = /data-([\w-]+)="([^"]*)"/g;
     let dm;
-    while ((dm = dataRe.exec(tagStr))) el.dataset[dm[1]] = dm[2];
+    while ((dm = dataRe.exec(tagStr))) {
+      const raw = dm[1];
+      el.dataset[raw] = dm[2];
+      // 真实 DOM 里 data-step-up 也能用 dataset.stepUp 访问（驼峰），
+      // 桩必须同样支持，否则会跟生产代码的行为对不上
+      if (raw.includes('-')) {
+        const camel = raw.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+        el.dataset[camel] = dm[2];
+      }
+    }
     const typeM = tagStr.match(/type="([^"]*)"/);
     if (typeM) el.type = typeM[1];
     const valM = tagStr.match(/value="([^"]*)"/);
@@ -108,10 +117,16 @@ function parseInto(html, container) {
     container.appendChild(el);
   }
   // 带 data-attr / data-skill 等属性的 input 也要能找到
-  const dataOnlyRe = /<(\w+)[^>]*\b(data-(?:attr|skill|custom|bg|w|e|s|levels|hint|wi|ei|si|tab|mode|count|act))="([^"]*)"[^>]*>/g;
+  const dataOnlyRe = /<(\w+)[^>]*\b(data-(?:attr|skill|custom|bg|w|e|s|levels|hint|wi|ei|si|tab|mode|count|act|step-up|step-down|skillrow|suggest))="([^"]*)"[^>]*>/g;
   while ((m = dataOnlyRe.exec(html))) {
     const el = new El(m[1]);
-    el.dataset[m[2].slice(5)] = m[3];
+    const raw = m[2].slice(5);
+    el.dataset[raw] = m[3];
+    // 与真实 DOM 一致：data-step-up 也能用 dataset.stepUp 取到
+    if (raw.includes('-')) {
+      const camel = raw.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+      el.dataset[camel] = m[3];
+    }
     const tagStr = m[0];
     const valM = tagStr.match(/value="([^"]*)"/);
     if (valM) el.value = valM[1];
@@ -210,6 +225,55 @@ if (reconInp) {
   ok(true, '改技能值后点数面板重算没有抛错');
 }
 
+// ---- 技能步进器 ----
+// 每行技能除了输入框，还应该有 − / ＋ 两个按钮
+const upBtn = backdrop.querySelector('[data-step-up="侦查"]');
+const downBtn = backdrop.querySelector('[data-step-down="侦查"]');
+ok(upBtn, '技能行渲染出加号按钮');
+ok(downBtn, '技能行渲染出减号按钮');
+
+if (upBtn && downBtn) {
+  const inp = backdrop.querySelector('[data-skill="侦查"]');
+  // 步进器读的是 work.skills，不是 DOM 上的 value，
+  // 所以先走一遍 oninput 把值同步进去，再点按钮
+  inp.value = '50';
+  inp.oninput();
+
+  upBtn.onclick({ shiftKey: false });
+  ok(Number(inp.value) === 51, '点加号 +1');
+
+  downBtn.onclick({ shiftKey: false });
+  ok(Number(inp.value) === 50, '点减号 -1');
+
+  // Shift 一次 10 点
+  upBtn.onclick({ shiftKey: true });
+  ok(Number(inp.value) === 60, 'Shift + 加号一次 +10');
+
+  // 下限 0：从 0 再减不会变负
+  inp.value = '0';
+  inp.oninput();
+  downBtn.onclick({ shiftKey: false });
+  ok(Number(inp.value) === 0, '减到 0 就停住');
+
+  // 上限 99
+  inp.value = '99';
+  inp.oninput();
+  upBtn.onclick({ shiftKey: false });
+  ok(Number(inp.value) === 99, '加到 99 就停住');
+}
+
+// ---- 克苏鲁神话锁定 ----
+// 原版规则不给加点：这一行不该有输入框和步进按钮，只有只读文本
+const mythosRow = backdrop.querySelector('[data-skillrow="克苏鲁神话"]');
+ok(mythosRow, '技能表里有克苏鲁神话这一行');
+ok(!backdrop.querySelector('[data-step-up="克苏鲁神话"]'), '克苏鲁神话没有加号按钮');
+ok(!backdrop.querySelector('[data-step-down="克苏鲁神话"]'), '克苏鲁神话没有减号按钮');
+
+const mythosInput = backdrop.querySelector('[data-skill="克苏鲁神话"]');
+ok(mythosInput, '克苏鲁神话有值节点');
+ok(mythosInput && mythosInput.tagName !== 'INPUT', '克苏鲁神话的值不是可编辑输入框');
+ok(skillsPageHtml.includes('不可加点'), '页面上明确标注不可加点');
+
 // 切到背景页
 const bgTab = tabs.find((t) => t.dataset.tab === 'bg');
 bgTab.onclick();
@@ -284,6 +348,50 @@ ok(cfg.mode === 'player', '模式为 player');
 ok(cfg.module === null, '默认无模组（自由创作）');
 ok(cfg.playerChar && cfg.playerChar.name, 'cfg 带出玩家角色卡');
 ok(Array.isArray(cfg.teammates) && cfg.teammates.length >= 1, 'cfg 带出队友角色卡');
+
+console.log('\n== 游戏内编辑：神话值不能被清零 ==');
+// 游戏进行中也能从侧边面板打开编辑器（旧签名带 state）。
+// 那时克苏鲁神话是玩家靠遭遇攒下来的，保存时绝不能归零。
+modalRoot.children = [];
+
+const inGame = createCharacter({ name: '老调查员', isPlayer: true });
+inGame.occupation = '记者';
+// 模拟已经见过一些不该见的东西
+inGame.skills['克苏鲁神话'] = 23;
+
+const fakeState = { playerChar: inGame, teammates: [], log: [], apiConfig: {} };
+openCharEditor(fakeState, inGame, () => {});
+
+const inGameBackdrop = modalRoot.children[0];
+ok(inGameBackdrop, '游戏内编辑器已打开');
+
+// 默认停在基本信息页，先切到技能页
+const inGameTabs = inGameBackdrop.querySelectorAll('.ce-tab');
+const inGameSkillTab = inGameTabs.find((t) => t.dataset.tab === 'skills');
+ok(inGameSkillTab, '游戏内编辑器有技能页');
+inGameSkillTab.onclick();
+
+// 游戏内这一行必须是可编辑的，否则玩家没法结算遭遇带来的增长
+const inGameMythosRow = inGameBackdrop.querySelector('[data-skillrow="克苏鲁神话"]');
+ok(inGameMythosRow, '游戏内也能看到克苏鲁神话行');
+ok(!!inGameBackdrop.querySelector('[data-step-up="克苏鲁神话"]'),
+  '游戏内克苏鲁神话可以加点（遭遇会涨神话值）');
+
+// 保存后值必须原样保留
+inGameBackdrop.querySelector('#btnSaveChar').onclick();
+ok(inGame.skills['克苏鲁神话'] === 23,
+  `游戏内保存后神话值保留（实际 ${inGame.skills['克苏鲁神话']}）`);
+
+// 再验证车卡阶段仍然归零
+modalRoot.children = [];
+const freshCh = createCharacter({ name: '新人', isPlayer: true });
+freshCh.occupation = '记者';
+freshCh.skills['克苏鲁神话'] = 15;   // 故意塞个脏值
+openCharEditor(freshCh, { title: '车卡', allowAIGen: false });
+const freshBackdrop = modalRoot.children[0];
+freshBackdrop.querySelector('#btnSaveChar').onclick();
+ok(freshCh.skills['克苏鲁神话'] === 0,
+  `车卡阶段保存时神话值归零（实际 ${freshCh.skills['克苏鲁神话']}）`);
 
 console.log('\n' + '='.repeat(40));
 console.log(`通过 ${passed} 项，失败 ${failed} 项`);

@@ -240,13 +240,32 @@ function openCharEditorImpl(ch, opts = {}) {
       const customName = def.custom
         ? `<input class="sk-custom" type="text" data-custom="${escapeHtml(def.name)}"
              value="${escapeHtml(work.customNames[def.name] || '')}" placeholder="具体名称">`
-        : '';
+        // 非自定义技能没有输入框，但网格是 4 列，留个空位保证列对齐
+        : '<span class="sk-custom-gap"></span>';
       const occ = isOccSkill(def.name);
+
+      // 克苏鲁神话：车卡阶段不给加点（原版规则只能靠游戏内遭遇增长）。
+      // 但游戏进行中打开这个编辑器时（带 state），神话值要能改，
+      // 否则玩家没法结算遭遇带来的增长。
+      if (def.mythos && !state) {
+        return `
+        <div class="ce-skill-row is-locked" data-skillrow="${escapeHtml(def.name)}">
+          <span class="sk-name">${escapeHtml(def.name)} <em class="sk-warn">⚠</em></span>
+          <span class="sk-lock-hint">不可加点</span>
+          <span class="sk-val-readonly" data-skill="${escapeHtml(def.name)}">${val}</span>
+          <span class="sk-levels" data-levels="${escapeHtml(def.name)}">${lv.hard} / ${lv.extreme}</span>
+        </div>`;
+      }
+
       return `
         <div class="ce-skill-row ${occ ? 'is-occ' : ''}" data-skillrow="${escapeHtml(def.name)}">
-          <span class="sk-name">${escapeHtml(def.name)}${def.mythos ? ' <em class="sk-warn">⚠</em>' : ''}</span>
+          <span class="sk-name">${escapeHtml(def.name)}</span>
           ${customName}
-          <input class="sk-val" type="number" min="0" max="99" data-skill="${escapeHtml(def.name)}" value="${val}">
+          <div class="sk-stepper">
+            <button type="button" class="sk-step" data-step-down="${escapeHtml(def.name)}" aria-label="减少">−</button>
+            <input class="sk-val" type="number" min="0" max="99" data-skill="${escapeHtml(def.name)}" value="${val}">
+            <button type="button" class="sk-step" data-step-up="${escapeHtml(def.name)}" aria-label="增加">＋</button>
+          </div>
           <span class="sk-levels" data-levels="${escapeHtml(def.name)}">${lv.hard} / ${lv.extreme}</span>
         </div>`;
     }).join('');
@@ -415,6 +434,8 @@ function openCharEditorImpl(ch, opts = {}) {
 
     // 技能
     backdrop.querySelectorAll('[data-skill]').forEach((inp) => {
+      // 只读的（克苏鲁神话）是 span，没有 value 可读，跳过
+      if (inp.tagName !== 'INPUT') return;
       const v = parseInt(inp.value, 10);
       if (!isNaN(v)) work.skills[inp.dataset.skill] = Math.max(0, Math.min(99, v));
     });
@@ -542,14 +563,44 @@ function openCharEditorImpl(ch, opts = {}) {
         if (el) el.innerHTML = budgetLine();
       };
 
+      /**
+       * 统一改技能值：夹到 0~99，同步输入框、困难/极难值、点数账目。
+       * 输入框直接改和点 −/＋ 都走这里，避免两条路径行为不一致。
+       */
+      const setSkill = (name, next) => {
+        const v = Math.max(0, Math.min(99, Math.round(Number(next) || 0)));
+        work.skills[name] = v;
+
+        const inp = backdrop.querySelector(`[data-skill="${name}"]`);
+        if (inp && inp.value !== String(v)) inp.value = v;
+
+        const lv = skillLevels(v);
+        const el = backdrop.querySelector(`[data-levels="${name}"]`);
+        if (el) el.textContent = `${lv.hard} / ${lv.extreme}`;
+
+        refreshBudget();
+      };
+
       backdrop.querySelectorAll('[data-skill]').forEach((inp) => {
-        inp.oninput = () => {
-          const v = parseInt(inp.value, 10) || 0;
-          work.skills[inp.dataset.skill] = v;
-          const lv = skillLevels(v);
-          const el = backdrop.querySelector(`[data-levels="${inp.dataset.skill}"]`);
-          if (el) el.textContent = `${lv.hard} / ${lv.extreme}`;
-          refreshBudget();
+        // 只读的（克苏鲁神话）没有输入框，这里是 number input
+        if (inp.tagName !== 'INPUT') return;
+        inp.oninput = () => setSkill(inp.dataset.skill, inp.value);
+      });
+
+      // − / ＋ 步进按钮
+      backdrop.querySelectorAll('[data-step-up]').forEach((btn) => {
+        btn.onclick = (ev) => {
+          const name = btn.dataset.stepUp;
+          const cur = Number(work.skills[name] ?? 0);
+          // 按住 Shift 一次加 10，方便快速拉到目标值
+          setSkill(name, cur + (ev.shiftKey ? 10 : 1));
+        };
+      });
+      backdrop.querySelectorAll('[data-step-down]').forEach((btn) => {
+        btn.onclick = (ev) => {
+          const name = btn.dataset.stepDown;
+          const cur = Number(work.skills[name] ?? 0);
+          setSkill(name, cur - (ev.shiftKey ? 10 : 1));
         };
       });
 
@@ -691,6 +742,14 @@ function openCharEditorImpl(ch, opts = {}) {
   backdrop.querySelector('#btnSaveChar').onclick = () => {
     collect();
     const final = normalizeCharacter(work);
+    // 克苏鲁神话在车卡阶段恒为 0（原版规则不给加点）。
+    //
+    // 但游戏进行中也能从这个编辑器改卡（旧签名带 state 的入口），
+    // 那时神话值是玩家靠遭遇一点点攒下来的，绝不能清掉。
+    // 所以只在「车卡阶段」（没有 state）才归零。
+    if (!state) {
+      final.skills['克苏鲁神话'] = 0;
+    }
     // 原地写回，保持外部引用
     for (const k of Object.keys(final)) ch[k] = final[k];
     onSaved?.(ch);

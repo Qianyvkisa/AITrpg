@@ -22,7 +22,7 @@ import { BUILTIN_MODULES, findBuiltinModule, openingFor } from '../src/core/buil
 import { moduleInfoFor, moduleRowMeta, extractFactsFromRaw, FREE_PLAY_INFO } from '../src/core/moduleInfo.js';
 import {
   SKILL_DEFS, DEFAULT_SKILLS, refreshDerived, skillLevels,
-  displaySkillName, normalizeCharacter, rollAttributes
+  displaySkillName, normalizeCharacter, rollAttributes, isSkillEditable
 } from '../src/core/character.js';
 import {
   buildCharPrompt, parseCharJson, charFromAI, generateCharacter, randomCharacter
@@ -856,6 +856,25 @@ group('SKILL_DEFS 技能全表', () => {
   ok(customs.every((s) => s.name.match(/[①②③]|自定义技能/)), '自定义槽都带序号或标记');
 });
 
+// ---------------------------------------------------------------------------
+group('克苏鲁神话不可加点', () => {
+  // 原版规则：神话知识只能靠游戏内遭遇增长，车卡阶段一律从 0 开始
+  eq(isSkillEditable('克苏鲁神话'), false, '克苏鲁神话不可加点');
+
+  // 其他技能照常可改
+  eq(isSkillEditable('会计'), true, '普通技能可加点');
+  eq(isSkillEditable('侦查'), true, '侦查可加点');
+  eq(isSkillEditable('闪避'), true, '闪避可加点');
+
+  // 未知技能名不该被误锁
+  eq(isSkillEditable('不存在的技能'), true, '未知技能默认可加点');
+
+  // 只有克苏鲁神话带 mythos 标记
+  const mythos = SKILL_DEFS.filter((s) => s.mythos);
+  eq(mythos.length, 1, '只有一个神话类技能');
+  eq(mythos[0].name, '克苏鲁神话', '带 mythos 标记的是克苏鲁神话');
+});
+
 group('createCharacter 角色卡字段完整', () => {
   const ch = createCharacter({ name: '测试员', isPlayer: true });
 
@@ -1059,9 +1078,12 @@ group('charFromAI 组装角色卡', () => {
   ok(badSkill.skills['不存在技能'] === undefined, '非法技能名被丢弃');
   eq(badSkill.skills['侦查'], 50, '合法技能保留');
 
-  // 克苏鲁神话新建卡不该高
+  // 克苏鲁神话在车卡阶段恒为 0（原版规则不给加点）
   const mythos = charFromAI({ skills: { 克苏鲁神话: 90 } }, {});
-  ok(mythos.skills['克苏鲁神话'] <= 5, '新建卡克苏鲁神话被压到 ≤5');
+  eq(mythos.skills['克苏鲁神话'], 0, 'AI 给的克苏鲁神话被强制归零');
+
+  const mythos2 = charFromAI({ skills: { 克苏鲁神话: 5 } }, {});
+  eq(mythos2.skills['克苏鲁神话'], 0, '克苏鲁神话 5 也被归零，不是压到 5');
 });
 
 group('generateCharacter 调用链', () => {
