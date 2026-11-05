@@ -1027,6 +1027,36 @@ body::before {
   text-align: right; white-space: nowrap;
 }
 
+/* 本职技能：左侧留一道标记，一眼能看出哪些技能吃职业点 */
+.ce-skill-row.is-occ { box-shadow: inset 2px 0 0 var(--accent-soft); padding-left: 7px; }
+.ce-skill-row.is-occ .sk-name { color: var(--ink); }
+
+/* 技能点账目面板 */
+.sk-budget {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 5px;
+  background: rgba(255,255,255,.02);
+}
+.sk-budget.empty {
+  display: block; font-size: 11.5px; color: var(--ink-dim); line-height: 1.6;
+}
+.sk-budget-item { display: flex; align-items: baseline; gap: 8px; }
+.sk-budget-item span { font-size: 11px; color: var(--ink-dim); }
+.sk-budget-item b {
+  font-family: var(--font-mono); font-size: 16px; color: var(--accent); font-weight: 500;
+}
+.sk-budget-item em {
+  font-style: normal; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint);
+}
+.sk-budget-occ {
+  grid-column: 1 / -1; font-size: 10.5px; color: var(--ink-faint);
+  border-top: 1px solid rgba(255,255,255,.05); padding-top: 7px;
+}
+/* 点数为负 = 超支，要显眼 */
+.sk-budget.over { border-color: #a3402f; background: rgba(163,64,47,.08); }
+.sk-budget.over .sk-budget-item b,
+.sk-budget.over .sk-budget-item em { color: #d9705c; }
+
 .field .pair { display: flex; align-items: center; gap: 6px; }
 .field .pair input {
   flex: 1; background: #0e1117; border: 1px solid var(--border); border-radius: 3px;

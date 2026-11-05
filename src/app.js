@@ -11,7 +11,7 @@ import { createCharacter } from './core/character.js';
 import { createInitialState, createDefaultCharacter } from './state.js';
 import { buildSnapshot, applySnapshot } from './persistence.js';
 import { generateTeammateLine } from './services/teammate.js';
-import { renderAll, renderScene, resetPanelCache } from './ui/panels.js';
+import { renderAll, renderScene, resetPanelCache, applyEditingLock } from './ui/panels.js';
 import {
   renderMessage,
   renderAllMessages,
@@ -40,6 +40,8 @@ let busy = false;
 function showStartScreen() {
   $('#startScreen').hidden = false;
   $('#app').hidden = true;
+  // 回到开始界面：重新放开「加队友 / 加调查员」，这时还能调整队伍
+  applyEditingLock(false);
   refreshStartScreen();
 }
 
@@ -47,6 +49,9 @@ function showStartScreen() {
 function enterGame() {
   $('#startScreen').hidden = true;
   $('#app').hidden = false;
+
+  // 开局后不再允许增删队友与调查员，避免破坏已跑起来的局面
+  applyEditingLock(true);
 
   // 换了局面/读档：面板缓存要作废，否则同名角色不会重画
   resetPanelCache();

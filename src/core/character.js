@@ -259,7 +259,14 @@ export function rollAttributes() {
   };
 }
 
-/** 职业加点：按 7e 把职业点数分配到技能（简化：教育×N 点） */
+/**
+ * 职业加点（简化版：教育×N 点）。
+ *
+ * 注意：这是早期只按 EDU 估算的粗略算法，不能反映真实规则——
+ * 很多职业是「教育×2＋力量或敏捷×2」这类复合公式，还牵扯本职技能范围。
+ * 真正的点数计算见 core/occupations.js 的 occupationTotal() / skillPointBudget()。
+ * 保留此函数只是为了兼容既有调用与测试。
+ */
 export function occupationPoints(attrs, multiplier = 4) {
   return attrs.EDU * multiplier;
 }

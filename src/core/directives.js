@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 import { rollD100, rollDice, successLevel, expandDb } from './dice.js';
 import { difficultyToSkill, formatCheckResult, formatSanResult } from './protocol.js';
-import { applySanCheck, checkInsanity, parseSanLoss } from './sanity.js';
+import { applySanCheck, checkInsanity } from './sanity.js';
 
 const handlers = new Map();
 
@@ -244,6 +244,34 @@ export function rollPending(ctx, pending) {
   return null;
 }
 
+/**
+ * 决定这条指令作用在谁身上。
+ *
+ * 原来只认「指令里写的角色」→「玩家角色」，旁观模式下没有玩家角色，
+ * 会兜底成字面量「调查员」，然后找不到这个人，检定直接失败。
+ *
+ * 这里按可用性依次回退：
+ *   1) 指令里显式写的角色
+ *   2) 玩家角色（成为调查员模式）
+ *   3) 队伍里的第一位队友（旁观模式没有玩家角色，AI 常省略角色名）
+ * @returns {{who: string, ch: object|null}}
+ */
+function pickActor(ctx, d) {
+  const explicit = d.opts['角色'];
+  if (explicit) {
+    return { who: explicit, ch: ctx.findChar(explicit) };
+  }
+
+  const player = ctx.state.playerChar;
+  if (player) return { who: player.name, ch: player };
+
+  const firstMate = (ctx.state.teammates || [])[0];
+  if (firstMate) return { who: firstMate.name, ch: firstMate };
+
+  // 一个人都没有（理论上的空局）：保留原文兜底，由调用方决定怎么处理
+  return { who: '调查员', ch: null };
+}
+
 // ---------------------------------------------------------------------------
 // CHECK —— 技能检定
 //
@@ -251,11 +279,10 @@ export function rollPending(ctx, pending) {
 // 队友 / NPC：自动掷，玩家只观看
 // ---------------------------------------------------------------------------
 define('CHECK', (ctx, d) => {
-  const who = d.opts['角色'] || ctx.state.playerChar?.name || '调查员';
+  const { who, ch } = pickActor(ctx, d);
   const difficulty = d.opts['难度'] || '常规';
   const skillName = d.head;
 
-  const ch = ctx.findChar(who);
   if (!ch) {
     return { text: `【系统】找不到角色「${who}」`, kind: 'error' };
   }
@@ -299,16 +326,20 @@ define('CHECK', (ctx, d) => {
 // 结算统一走 rollPending()，保证两条路径的疯狂判定完全一致。
 // ---------------------------------------------------------------------------
 define('SAN', (ctx, d) => {
-  const who = d.opts['角色'] || ctx.state.playerChar?.name;
-  const ch = targetChar(ctx, d);
-  if (!ch) return null;
+  const { who, ch } = pickActor(ctx, d);
+
+  // 找不到角色要明确报错，不能静默返回 null。
+  // 原来这里 return null，KP 的理智检定会「什么都没发生」地消失，
+  // 玩家看不到任何提示，也不知道 SAN 没被结算。
+  if (!ch) {
+    return { text: `【系统】找不到角色「${who}」`, kind: 'error' };
+  }
 
   const lossExpr = d.head;
   const reason = d.opts['原因'] || '';
 
   // 玩家角色 → 等待玩家亲自掷骰
   if (isPlayerChar(ctx, ch)) {
-    const { onSuccess, onFailure } = parseSanLoss(lossExpr);
     const pending = {
       id: 'roll-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
       kind: 'san',

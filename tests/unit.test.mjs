@@ -1439,6 +1439,86 @@ group('队友 SAN 自动结算，不进入待掷骰', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 旁观模式：没有玩家角色时，CHECK / SAN 要落到队友身上
+//
+// 这两条是回归测试。原来 CHECK 把角色兜底成字面量「调查员」，
+// 旁观模式没有玩家角色，于是找不到人、检定直接报错；
+// SAN 更糟，找不到人时 return null，整条理智检定静默消失，
+// 玩家完全不知道 SAN 没被结算。
+// ---------------------------------------------------------------------------
+function makeSpectatorCtx() {
+  const mate = createCharacter({ name: '队友乙', isPlayer: false });
+  mate.skills['侦查'] = 60;
+  mate.attrs.POW = 50;
+  mate.san.current = 60;
+
+  const msgs = [];
+  const state = {
+    playerChar: null,              // 旁观模式的关键：没有玩家角色
+    teammates: [mate],
+    scenario: { scene: '', events: [], clues: [], secrets: [], notes: '', ended: false, ending: '' },
+    messages: msgs
+  };
+  const ctx = {
+    state,
+    findChar: (n) => (n === '队友乙' ? mate : null),
+    pushMessage: (m) => {
+      const x = { id: 'm' + msgs.length, ...m };
+      msgs.push(x);
+      return x;
+    },
+    updateMessage: (id, patch) => {
+      const x = msgs.find((m) => m.id === id);
+      if (x) Object.assign(x, patch);
+      return x;
+    }
+  };
+  return { ctx, state, mate, msgs };
+}
+
+group('旁观模式 CHECK 未指定角色时落到队友', () => {
+  const { ctx } = makeSpectatorCtx();
+  const r = getHandler('CHECK')(ctx, { head: '侦查', opts: {}, type: 'CHECK' });
+
+  eq(r.kind, 'check', '正常产出检定结果，不是 error');
+  eq(r.who, '队友乙', '作用对象是队伍里的队友');
+  eq(r.status, 'rolled', '队友自动掷完，不是 pending');
+  ok(r.roll !== undefined, '已经掷出骰点');
+});
+
+group('旁观模式 SAN 未指定角色时落到队友', () => {
+  const { ctx, mate } = makeSpectatorCtx();
+  const before = mate.san.current;
+  const r = getHandler('SAN')(ctx, { head: '1/1d6', opts: {}, type: 'SAN' });
+
+  ok(r !== null, '不能静默返回 null');
+  eq(r.kind, 'san', '正常结算理智');
+  eq(r.who, '队友乙', '作用对象是队伍里的队友');
+  eq(mate.san.current, before - r.loss, 'SAN 真的被扣减了');
+});
+
+group('一个人都没有时，CHECK / SAN 都明确报错', () => {
+  const empty = {
+    state: {
+      playerChar: null,
+      teammates: [],
+      scenario: { scene: '', events: [], clues: [], secrets: [], notes: '', ended: false, ending: '' },
+      messages: []
+    },
+    findChar: () => null,
+    pushMessage: (m) => m,
+    updateMessage: (id) => id
+  };
+
+  const rc = getHandler('CHECK')(empty, { head: '侦查', opts: {}, type: 'CHECK' });
+  eq(rc.kind, 'error', 'CHECK 报错而不是崩掉');
+
+  const rs = getHandler('SAN')(empty, { head: '1/1d6', opts: {}, type: 'SAN' });
+  ok(rs !== null, 'SAN 不能静默返回 null');
+  eq(rs.kind, 'error', 'SAN 明确报错');
+});
+
+// ---------------------------------------------------------------------------
 // 汇总
 // ---------------------------------------------------------------------------
 console.log('\n' + '='.repeat(50));

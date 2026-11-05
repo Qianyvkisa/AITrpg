@@ -94,6 +94,9 @@ export function renderCharList(state) {
 /** 角色卡点击回调，由 renderAll 注入 */
 let charEditHandler = null;
 
+/** 游戏已开始时置 true：队友卡片不再显示移除按钮 */
+let listLocked = false;
+
 export function renderTeammateList(state) {
   if (!state.teammates.length) {
     setHtml('#teammateList', '<div class="empty-hint">还没有队友，点 + 让 AI 扮演一位调查员</div>');
@@ -110,7 +113,7 @@ export function renderTeammateList(state) {
           <div class="tm-name">${escapeHtml(t.name)}</div>
           <div class="tm-role">${escapeHtml(t.occupation || '调查员')} · HP ${t.hp.current} SAN ${t.san.current}</div>
         </div>
-        <button class="icon-btn" data-tm-index="${i}" title="移除队友">×</button>
+        ${listLocked ? '' : `<button class="icon-btn" data-tm-index="${i}" title="移除队友">×</button>`}
       </div>`
       )
       .join('')
@@ -235,6 +238,36 @@ export function renderAll(state, handlers = {}) {
   renderRollLog(state);
   renderScene(state);
   renderConnStatus(state);
+}
+
+/**
+ * 按「游戏是否已经开始」调整可增删入口的显隐。
+ *
+ * 开局后再让人加删队友/调查员，会破坏已经跑起来的局面：
+ * 新加的人没有历史上下文，删掉的人又会让剧情里已经发生的对话失去主语。
+ * 所以这两个入口只在开始界面（还没进游戏）时给用。
+ *
+ * @param {boolean} started true = 已进入游戏
+ */
+export function applyEditingLock(started) {
+  const addTeammate = $('#btnAddTeammate');
+  const addChar = $('#btnNewChar');
+
+  for (const btn of [addTeammate, addChar]) {
+    if (!btn) continue;
+    btn.hidden = started;
+    btn.style.display = started ? 'none' : '';
+  }
+
+  // 队友卡片上的「×」是渲染出来的，
+  // 改标记后要让列表按新状态重画，否则已经画出来的按钮会留在那儿
+  if (listLocked !== started) {
+    listLocked = started;
+    const list = $('#teammateList');
+    if (list) list.classList.toggle('locked', started);
+    return true; // 需要调用方重绘队友列表
+  }
+  return false;
 }
 
 /** 清空脏检查缓存（进游戏 / 读档后强制整体重画时用） */

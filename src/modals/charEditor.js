@@ -6,9 +6,10 @@
 // ---------------------------------------------------------------------------
 import { openModal } from './shell.js';
 import {
-  ATTRS, SKILL_DEFS, refreshDerived, rollAttributes, skillLevels,
+  ATTRS, SKILL_DEFS, baseSkillValue, refreshDerived, rollAttributes, skillLevels,
   normalizeCharacter
 } from '../core/character.js';
+import { isOccupationalSkill, skillPointBudget } from '../core/occupations.js';
 import { escapeHtml } from '../shared/text.js';
 import { randomCharacter } from '../services/charGen.js';
 
@@ -176,6 +177,46 @@ function openCharEditorImpl(ch, opts = {}) {
     `;
   };
 
+  // -------------------------------------------------------------------------
+  // 技能点账目
+  //
+  // 规则来自 COC7 空白卡那张 Excel（详见 core/occupations.js 顶部注释）：
+  //   剩余职业点 = 职业公式结果 − 加到本职技能上的点
+  //   剩余兴趣点 = 智力×2     − 加到非本职技能上的点
+  // 只有「超过初始值」的部分才算加点，所以先要能取到每个技能的初始值。
+  // -------------------------------------------------------------------------
+  const baseOf = (skillName) => {
+    const def = SKILL_DEFS.find((d) => d.name === skillName);
+    return def ? baseSkillValue(def, work.attrs) : 0;
+  };
+  const displayOf = (skillName) => work.customNames?.[skillName] || '';
+  const isOccSkill = (skillName) => isOccupationalSkill(work, skillName, displayOf);
+  const budget = () => skillPointBudget(work, baseOf, isOccSkill);
+
+  /** 把账目渲染成一行文字，供技能页顶部显示 */
+  const budgetLine = () => {
+    const b = budget();
+    if (!b.occupation) {
+      return '<div class="sk-budget empty">还没填职业，职业点无法计算。去「基本信息」填一个职业名，比如「会计师」「记者」。</div>';
+    }
+    const over = b.occLeft < 0 || b.intLeft < 0;
+    const cls = over ? 'sk-budget over' : 'sk-budget';
+    return `
+      <div class="${cls}" data-budget="occ">
+        <div class="sk-budget-item" data-budget-occ>
+          <span>职业点</span>
+          <b>${b.occUsed} / ${b.occTotal}</b>
+          <em>剩 ${b.occLeft}</em>
+        </div>
+        <div class="sk-budget-item" data-budget-int>
+          <span>兴趣点</span>
+          <b>${b.intUsed} / ${b.intTotal}</b>
+          <em>剩 ${b.intLeft}</em>
+        </div>
+        <div class="sk-budget-occ">${escapeHtml(b.occupation.name)}（${escapeHtml(b.occupation.credit)}）· ${escapeHtml(b.occupation.pts)}</div>
+      </div>`;
+  };
+
   const renderSkills = () => {
     const rows = SKILL_DEFS.map((def) => {
       const val = work.skills[def.name] ?? def.base;
@@ -184,8 +225,9 @@ function openCharEditorImpl(ch, opts = {}) {
         ? `<input class="sk-custom" type="text" data-custom="${escapeHtml(def.name)}"
              value="${escapeHtml(work.customNames[def.name] || '')}" placeholder="具体名称">`
         : '';
+      const occ = isOccSkill(def.name);
       return `
-        <div class="ce-skill-row" data-skillrow="${escapeHtml(def.name)}">
+        <div class="ce-skill-row ${occ ? 'is-occ' : ''}" data-skillrow="${escapeHtml(def.name)}">
           <span class="sk-name">${escapeHtml(def.name)}${def.mythos ? ' <em class="sk-warn">⚠</em>' : ''}</span>
           ${customName}
           <input class="sk-val" type="number" min="0" max="99" data-skill="${escapeHtml(def.name)}" value="${val}">
@@ -194,6 +236,11 @@ function openCharEditorImpl(ch, opts = {}) {
     }).join('');
 
     return `
+      <section class="field-group">
+        <h3>技能点 <span class="hint">本职技能加点走职业点，其余走兴趣点</span></h3>
+        <div id="skBudget">${budgetLine()}</div>
+      </section>
+
       <section class="field-group">
         <h3>技能表 <span class="hint">右列显示 困难值 / 极难值</span></h3>
         <div class="ce-skill-grid">${rows}</div>
@@ -450,6 +497,13 @@ function openCharEditorImpl(ch, opts = {}) {
   // 各标签页的即时联动
   // -------------------------------------------------------------------------
   const bindTab = () => {
+    // 基本信息页：职业改动要立刻写回 work，
+    // 否则直接切到「技能」页时，点数账目还是按旧职业算的。
+    if (activeTab === 'basic') {
+      const occ = backdrop.querySelector('#fOcc');
+      if (occ) occ.oninput = () => { work.occupation = occ.value.trim(); refreshSummary(); };
+    }
+
     if (activeTab === 'attrs') {
       backdrop.querySelectorAll('[data-attr]').forEach((inp) => {
         inp.oninput = () => {
@@ -466,6 +520,12 @@ function openCharEditorImpl(ch, opts = {}) {
     }
 
     if (activeTab === 'skills') {
+      /** 技能值变了要同时刷新困难/极难值和顶部点数账目 */
+      const refreshBudget = () => {
+        const el = backdrop.querySelector('#skBudget');
+        if (el) el.innerHTML = budgetLine();
+      };
+
       backdrop.querySelectorAll('[data-skill]').forEach((inp) => {
         inp.oninput = () => {
           const v = parseInt(inp.value, 10) || 0;
@@ -473,6 +533,17 @@ function openCharEditorImpl(ch, opts = {}) {
           const lv = skillLevels(v);
           const el = backdrop.querySelector(`[data-levels="${inp.dataset.skill}"]`);
           if (el) el.textContent = `${lv.hard} / ${lv.extreme}`;
+          refreshBudget();
+        };
+      });
+
+      // 自定义子技能名会改变「是否算本职」的判断（任意特长），要一并重算
+      backdrop.querySelectorAll('[data-custom]').forEach((inp) => {
+        inp.oninput = () => {
+          work.customNames[inp.dataset.custom] = inp.value;
+          const row = backdrop.querySelector(`[data-skillrow="${inp.dataset.custom}"]`);
+          if (row) row.classList.toggle('is-occ', isOccSkill(inp.dataset.custom));
+          refreshBudget();
         };
       });
     }

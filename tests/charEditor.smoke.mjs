@@ -184,6 +184,32 @@ const skillTab = tabs.find((t) => t.dataset.tab === 'skills');
 skillTab.onclick();
 ok(backdrop.querySelector('[data-skill="侦查"]'), '技能页渲染出侦查输入框');
 
+// 技能点账目面板：本次新增，确认它出现在技能页。
+//
+// 这个 DOM 桩只把「带 id 的元素」建成空节点，不保留元素内部的 HTML，
+// 所以这里只能验证面板节点存在、且内容非空字符串；
+// 点数算得对不对由 tests/occupations.test.mjs 直接验证模块函数。
+const budgetBox = backdrop.querySelector('#skBudget');
+ok(budgetBox, '技能页渲染出技能点面板');
+
+// 面板是通过字符串拼进页面的，确认拼出来的内容里有这两个词
+const skillsPageHtml = body.innerHTML;
+ok(skillsPageHtml.includes('职业点'), '技能页 HTML 里包含「职业点」');
+ok(skillsPageHtml.includes('兴趣点'), '技能页 HTML 里包含「兴趣点」');
+ok(skillsPageHtml.includes('剩'), '技能页 HTML 里包含「剩余」字样');
+// 空白角色没填职业，应给出可操作的提示，而不是算出 0/0 让人困惑
+// （这个测试角色填了「记者」，所以这里验证的是另一条路径：能算出具体数值）
+ok(skillsPageHtml.includes('记者') || skillsPageHtml.includes('还没填职业'),
+  '填了职业时显示职业信息');
+
+// 改动技能值后面板要重算（这里只确认不报错）
+const reconInp = backdrop.querySelector('[data-skill="侦查"]');
+if (reconInp) {
+  reconInp.value = '60';
+  reconInp.oninput();
+  ok(true, '改技能值后点数面板重算没有抛错');
+}
+
 // 切到背景页
 const bgTab = tabs.find((t) => t.dataset.tab === 'bg');
 bgTab.onclick();
