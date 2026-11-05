@@ -265,6 +265,7 @@ function openCharEditorImpl(ch, opts = {}) {
             <button type="button" class="sk-step" data-step-down="${escapeHtml(def.name)}" aria-label="减少">−</button>
             <input class="sk-val" type="number" min="0" max="99" data-skill="${escapeHtml(def.name)}" value="${val}">
             <button type="button" class="sk-step" data-step-up="${escapeHtml(def.name)}" aria-label="增加">＋</button>
+            <button type="button" class="sk-step sk-reset" data-reset-skill="${escapeHtml(def.name)}" title="重置为初始值 ${baseOf(def.name)}" aria-label="重置">↺</button>
           </div>
           <span class="sk-levels" data-levels="${escapeHtml(def.name)}">${lv.hard} / ${lv.extreme}</span>
         </div>`;
@@ -277,7 +278,12 @@ function openCharEditorImpl(ch, opts = {}) {
       </section>
 
       <section class="field-group">
-        <h3>技能表 <span class="hint">右列显示 困难值 / 极难值</span></h3>
+        <h3 class="sk-head">
+          技能表
+          <span class="hint">右列显示 困难值 / 极难值</span>
+          <button type="button" class="sk-reset-all" id="btnResetAllSkills"
+                  title="把所有技能退回初始值，等于清空加点">全部重置</button>
+        </h3>
         <div class="ce-skill-grid">${rows}</div>
       </section>
     `;
@@ -603,6 +609,29 @@ function openCharEditorImpl(ch, opts = {}) {
           setSkill(name, cur - (ev.shiftKey ? 10 : 1));
         };
       });
+
+      // ↺ 单个技能重置：退回该技能的初始值（侦查 25、闪避按 DEX/2 算……），
+      // 等于只清掉这一个技能的加点，基础值保留。
+      backdrop.querySelectorAll('[data-reset-skill]').forEach((btn) => {
+        btn.onclick = () => {
+          const name = btn.dataset.resetSkill;
+          setSkill(name, baseOf(name));
+        };
+      });
+
+      // 「全部重置」：所有可加点技能一起退回初始值。
+      // 克苏鲁神话在车卡阶段本来就锁着，这里也跳过它，别去动它的值。
+      const resetAllBtn = backdrop.querySelector('#btnResetAllSkills');
+      if (resetAllBtn) {
+        resetAllBtn.onclick = () => {
+          SKILL_DEFS.forEach((def) => {
+            if (def.mythos && !state) return;
+            const inp = backdrop.querySelector(`[data-skill="${def.name}"]`);
+            if (inp && inp.tagName !== 'INPUT') return;   // 只读行没有输入框
+            setSkill(def.name, baseOf(def.name));
+          });
+        };
+      }
 
       // 自定义子技能名会改变「是否算本职」的判断（任意特长），要一并重算
       backdrop.querySelectorAll('[data-custom]').forEach((inp) => {

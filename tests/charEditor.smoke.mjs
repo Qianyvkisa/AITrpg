@@ -117,7 +117,7 @@ function parseInto(html, container) {
     container.appendChild(el);
   }
   // 带 data-attr / data-skill 等属性的 input 也要能找到
-  const dataOnlyRe = /<(\w+)[^>]*\b(data-(?:attr|skill|custom|bg|w|e|s|levels|hint|wi|ei|si|tab|mode|count|act|step-up|step-down|skillrow|suggest))="([^"]*)"[^>]*>/g;
+  const dataOnlyRe = /<(\w+)[^>]*\b(data-(?:attr|skill|custom|bg|w|e|s|levels|hint|wi|ei|si|tab|mode|count|act|step-up|step-down|reset-skill|skillrow|suggest))="([^"]*)"[^>]*>/g;
   while ((m = dataOnlyRe.exec(html))) {
     const el = new El(m[1]);
     const raw = m[2].slice(5);
@@ -261,6 +261,54 @@ if (upBtn && downBtn) {
   upBtn.onclick({ shiftKey: false });
   ok(Number(inp.value) === 99, '加到 99 就停住');
 }
+
+// ---- 重置按钮 ----
+// 单个技能 ↺：退回该技能的初始值，而不是归 0
+const resetBtn = backdrop.querySelector('[data-reset-skill="侦查"]');
+ok(resetBtn, '技能行渲染出重置按钮');
+
+if (resetBtn) {
+  const inp = backdrop.querySelector('[data-skill="侦查"]');
+  inp.value = '80';
+  inp.oninput();
+
+  resetBtn.onclick();
+  // 侦查初始值是 25
+  ok(Number(inp.value) === 25, `重置退回初始值 25（实际 ${inp.value}）`);
+}
+
+// 闪避的初始值由 DEX 推导（DEX/2），重置后也该是这个值
+const dexReset = backdrop.querySelector('[data-reset-skill="闪避"]');
+if (dexReset) {
+  const dexInp = backdrop.querySelector('[data-skill="闪避"]');
+  dexInp.value = '90';
+  dexInp.oninput();
+  dexReset.onclick();
+  const dex = Number(ch.attrs.DEX);
+  ok(Number(dexInp.value) === Math.floor(dex / 2),
+    `闪避重置回 DEX/2=${Math.floor(dex / 2)}（实际 ${dexInp.value}）`);
+}
+
+// 「全部重置」按钮存在，且能把所有技能退回初始值
+const resetAllBtn = backdrop.querySelector('#btnResetAllSkills');
+ok(resetAllBtn, '技能页有「全部重置」按钮');
+
+if (resetAllBtn) {
+  // 先把几个技能改乱
+  for (const [name, v] of [['侦查', '77'], ['聆听', '66'], ['图书馆使用', '88']]) {
+    const i = backdrop.querySelector(`[data-skill="${name}"]`);
+    if (i) { i.value = v; i.oninput(); }
+  }
+  resetAllBtn.onclick();
+
+  const after = (n) => Number(backdrop.querySelector(`[data-skill="${n}"]`).value);
+  ok(after('侦查') === 25, `全部重置后侦查回 25（实际 ${after('侦查')}）`);
+  ok(after('聆听') === 20, `全部重置后聆听回 20（实际 ${after('聆听')}）`);
+  ok(after('图书馆使用') === 20, `全部重置后图书馆使用回 20（实际 ${after('图书馆使用')}）`);
+}
+
+// 克苏鲁神话不该有重置按钮（这一行是只读的）
+ok(!backdrop.querySelector('[data-reset-skill="克苏鲁神话"]'), '克苏鲁神话没有重置按钮');
 
 // ---- 克苏鲁神话锁定 ----
 // 原版规则不给加点：这一行不该有输入框和步进按钮，只有只读文本

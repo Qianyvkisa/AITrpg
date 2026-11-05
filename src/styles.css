@@ -595,6 +595,27 @@ body::before {
   border-bottom: 1px solid var(--border-soft); padding-bottom: 6px;
 }
 
+/* 技能表标题栏：标题 + 提示 + 右侧「全部重置」，排成一行 */
+.field-group h3.sk-head {
+  display: flex; align-items: baseline; gap: 8px;
+}
+.field-group h3.sk-head .hint { letter-spacing: 0; }
+/* 全部重置按钮：低调的描边小按钮，不抢技能表本身的注意力 */
+.sk-reset-all {
+  margin-left: auto; flex: none;
+  background: transparent;
+  border: 1px solid var(--border); border-radius: 3px;
+  color: var(--ink-faint);
+  font-family: inherit; font-size: 10px; letter-spacing: 1px;
+  padding: 3px 8px; cursor: pointer;
+  transition: border-color .12s, color .12s, background .12s;
+}
+.sk-reset-all:hover {
+  border-color: var(--accent-soft); color: var(--accent);
+  background: rgba(184,137,74,.1);
+}
+.sk-reset-all:active { background: rgba(184,137,74,.2); }
+
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field > span { font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; }
 .field input, .field textarea {
@@ -1029,7 +1050,7 @@ body::before {
 }
 .sk-stepper:focus-within { border-color: var(--accent-soft); }
 .ce-skill-row .sk-val {
-  width: 44px; border: 0; border-radius: 0;
+  width: 40px; border: 0; border-radius: 0;
   background: transparent; color: var(--ink);
   font-family: var(--font-mono); font-size: 12px;
   padding: 3px 2px; outline: none; text-align: center;
@@ -1057,6 +1078,13 @@ body::before {
 /* 减号在左、加号在右，各自贴边 */
 [data-step-down] { border-right: 1px solid var(--border); }
 [data-step-up]   { border-left: 1px solid var(--border); }
+/* 重置按钮：跟加减区分开，用一道更明显的分隔线，悬停时偏暖色 */
+.sk-step.sk-reset {
+  border-left: 1px solid var(--border);
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+.sk-step.sk-reset:hover { color: var(--accent); background: rgba(184,137,74,.12); }
 
 .ce-skill-row .sk-levels {
   font-family: var(--font-mono); font-size: 10px; color: var(--ink-faint);
