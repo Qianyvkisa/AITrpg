@@ -10,7 +10,12 @@
 
   --ink: #c9ccd6;
   --ink-dim: #7f8697;
-  --ink-faint: #545b6b;
+  /* 原 #545b6b 在深色底上对比度仅 2.53~2.89:1，低于 WCAG 3:1 下限。
+     提亮到 #5f6778 后最差背景达 3.03:1（达标），同时与 --ink-dim 的
+     层次比仍有 1.56:1，保住「正文/次要/微弱」三级视觉层次。
+     注意不要提到 #6b7385 以上：那样与 ink-dim 层次比会掉到 1.3 以下，
+     三级文字会退化成两级，反而更糊。 */
+  --ink-faint: #5f6778;
 
   --accent: #b8894a;        /* 陈旧黄铜 */
   --accent-soft: #8a6534;
@@ -112,7 +117,7 @@ body::before {
   background: linear-gradient(180deg, #2a2219, #1e1a13);
   color: #d9c8a8;
   cursor: pointer;
-  transition: all .15s;
+  transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
   -webkit-app-region: no-drag;
 }
 .btn:hover { background: linear-gradient(180deg, #3a2f21, #2a2318); border-color: var(--accent); }
@@ -139,7 +144,7 @@ body::before {
   cursor: pointer;
   font-size: 15px;
   line-height: 1;
-  transition: all .15s;
+  transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
 }
 .icon-btn:hover { background: var(--bg-hover); color: var(--accent); border-color: var(--accent-soft); }
 
@@ -206,7 +211,7 @@ body::before {
   background: var(--bg-panel);
   padding: 10px 11px;
   cursor: pointer;
-  transition: all .15s;
+  transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
   position: relative;
 }
 .char-card:hover { border-color: var(--accent-soft); background: var(--bg-raised); }
@@ -703,7 +708,7 @@ body::before {
   color: var(--ink-dim);
   font-size: 12px;
   cursor: pointer;
-  transition: all .15s;
+  transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
 }
 .tone-opt:hover { border-color: var(--accent-soft); color: var(--ink); }
 .tone-opt.on { border-color: var(--accent); color: var(--accent); background: #1a1710; }
@@ -758,7 +763,7 @@ body::before {
   border: 1px solid var(--border);
   border-radius: 3px;
   cursor: pointer;
-  transition: all .15s;
+  transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
   font-family: var(--font-sans);
 }
 .mode-opt:hover { border-color: var(--accent-soft); }
@@ -879,7 +884,7 @@ body::before {
   color: var(--ink-dim);
   font-size: 12px;
   cursor: pointer;
-  transition: all .15s;
+  transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
   font-family: var(--font-sans);
 }
 .tm-opt:hover { border-color: var(--accent-soft); color: var(--ink); }
@@ -1157,7 +1162,7 @@ body::before {
   border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
-  transition: all .18s;
+  transition: background .18s, border-color .18s, color .18s, box-shadow .18s, transform .18s;
   font-family: var(--font-sans);
 }
 .menu-btn:hover {
@@ -1216,7 +1221,7 @@ body::before {
   border: 1px solid var(--border-soft);
   border-radius: 3px;
   cursor: pointer;
-  transition: all .15s;
+  transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
   font-family: var(--font-sans);
 }
 .menu-mini:hover { color: var(--ink); border-color: #333b4a; background: var(--bg-hover); }
@@ -1239,4 +1244,69 @@ body::before {
   .msg.roll .bubble,
   .msg.clue .bubble,
   .msg.system .bubble { max-width: 880px; }
+}
+
+/* =========================================================================
+   可访问性与交互细化（追加块）
+   放在文件末尾，靠层叠覆盖前面规则；不改变任何既有布局与配色。
+   ========================================================================= */
+
+/* ---- 1. 键盘焦点环 ----
+   原有 9 处 :focus 只改边框色，键盘用户几乎看不出焦点落在哪。
+   :focus-visible 只在键盘/辅助设备触发，鼠标点击不会出现多余光圈，
+   因此不会影响既有点击手感。 */
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* 输入框类已有自己的边框高亮，焦点环改为内描边，避免和边框色打架 */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid rgba(184, 137, 74, .55);
+  outline-offset: 1px;
+}
+
+/* ---- 2. 文本选中色 ----
+   默认的浏览器蓝与黄铜色系冲突，统一成低饱和的黄铜底。 */
+::selection {
+  background: rgba(184, 137, 74, .32);
+  color: #f0e6d2;
+}
+::-moz-selection {
+  background: rgba(184, 137, 74, .32);
+  color: #f0e6d2;
+}
+
+/* ---- 3. 减少动效偏好 ----
+   本程序有 pulse / blink / fade / modal 等动画；对前庭功能敏感的用户
+   这些动效会造成不适。系统开启「减少动效」时统一降为无动画，
+   但保留状态变化本身（颜色、边框仍会变，只是不做过渡与位移）。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---- 4. 禁用态统一 ----
+   原有 4 处 :disabled 各自写 opacity，这里补上光标与不可点击语义，
+   让所有禁用控件表现一致。 */
+button:disabled,
+input:disabled,
+textarea:disabled,
+select:disabled {
+  cursor: not-allowed;
+}
+
+/* ---- 5. 滚动条滑块在悬停/拖拽时更明显 ----
+   原样式已有 hover 态，这里补 active 态，拖拽时给用户反馈。 */
+::-webkit-scrollbar-thumb:active {
+  background: var(--accent-soft);
 }
