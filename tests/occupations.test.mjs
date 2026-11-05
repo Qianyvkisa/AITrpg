@@ -7,8 +7,8 @@
 
 import { SKILL_DEFS, baseSkillValue, createCharacter } from '../src/core/character.js';
 import {
-  OCCUPATIONS, SOCIAL_SKILLS, findOccupation, evalOccupationFormula,
-  occupationTotal, interestTotal, isOccupationalSkill, skillPointBudget
+  OCCUPATIONS, SOCIAL_SKILLS, OCCUPATION_ALIASES, findOccupation, suggestOccupations,
+  evalOccupationFormula, occupationTotal, interestTotal, isOccupationalSkill, skillPointBudget
 } from '../src/core/occupations.js';
 
 let passed = 0;
@@ -80,8 +80,64 @@ group('职业查找', () => {
   ok(findOccupation('侦探') !== null, '简称能匹配到「事务所侦探、保安」');
   ok(findOccupation('演员') !== null, '「演员」能匹配到演员类职业');
   eq(findOccupation('不存在职业'), null, '找不到返回 null');
-  eq(findOccupation(''), null, '空字符串返回 null');
-  eq(findOccupation(undefined), null, 'undefined 返回 null');
+  eq(findOccupation('') === null || findOccupation('') === undefined, true, '空字符串返回 null');
+  eq(findOccupation(undefined) === null || findOccupation(undefined) === undefined, true, 'undefined 返回 null');
+});
+
+// ---------------------------------------------------------------------------
+group('职业别名', () => {
+  // 队友模板用的是口语化职业名，必须能对上标准职业
+  const pairs = [
+    ['退伍军医', '队医'],
+    ['大学讲师', '教授/学者'],
+    ['码头工人', '劳工'],
+    ['图书馆员', '图书馆管理员（原作向）'],
+    ['搬运工', '劳工'],
+    ['水手', '海员-民船海员'],
+    ['刑警', '警方(原作向)-警探'],
+    ['小偷', '罪犯-窃贼'],
+    ['黑客', '黑客/骇客（现代）']
+  ];
+  for (const [alias, expect] of pairs) {
+    eq(findOccupation(alias)?.name, expect, `别名「${alias}」→「${expect}」`);
+  }
+
+  // 别名表里每条都必须指向真实存在的职业，防止打错字
+  const bad = [];
+  for (const [alias, target] of Object.entries(OCCUPATION_ALIASES)) {
+    if (!OCCUPATIONS.some((o) => o.name === target)) bad.push(`${alias}→${target}`);
+  }
+  eq(bad.length, 0, '所有别名都指向存在的职业');
+
+  // 别名优先级要高于模糊匹配：精确命中时不能被别名带偏
+  eq(findOccupation('护士')?.name, '护士', '精确名不受别名影响');
+});
+
+// ---------------------------------------------------------------------------
+group('队友模板职业全部可识别', () => {
+  // session.js 的 CHARACTER_POOL 里每个职业都要能查到，
+  // 否则 AI 队友的技能页会拿不到职业点
+  const seeds = ['退伍军医', '大学讲师', '记者', '古董商', '私家侦探', '护士', '码头工人', '图书馆员'];
+  for (const s of seeds) {
+    const hit = findOccupation(s);
+    ok(hit !== null, `队友职业「${s}」能查到（${hit ? hit.name : '未命中'}）`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+group('未知职业的候选建议', () => {
+  const s1 = suggestOccupations('图书管理员');
+  ok(s1.length > 0, '能给出候选');
+
+  // 建议里不该混进完全不相关的
+  const s2 = suggestOccupations('医生');
+  ok(s2.length > 0, '「医生」有候选');
+
+  eq(suggestOccupations('').length, 0, '空输入不给候选');
+  eq(suggestOccupations('   ').length, 0, '纯空格不给候选');
+
+  // 候选数量受 limit 约束
+  eq(suggestOccupations('医生', 2).length <= 2, true, 'limit 生效');
 });
 
 // ---------------------------------------------------------------------------

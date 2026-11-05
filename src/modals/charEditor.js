@@ -9,7 +9,7 @@ import {
   ATTRS, SKILL_DEFS, baseSkillValue, refreshDerived, rollAttributes, skillLevels,
   normalizeCharacter
 } from '../core/character.js';
-import { isOccupationalSkill, skillPointBudget } from '../core/occupations.js';
+import { isOccupationalSkill, skillPointBudget, suggestOccupations } from '../core/occupations.js';
 import { escapeHtml } from '../shared/text.js';
 import { randomCharacter } from '../services/charGen.js';
 
@@ -196,9 +196,25 @@ function openCharEditorImpl(ch, opts = {}) {
   /** 把账目渲染成一行文字，供技能页顶部显示 */
   const budgetLine = () => {
     const b = budget();
+
+    // 没填职业
     if (!b.occupation) {
-      return '<div class="sk-budget empty">还没填职业，职业点无法计算。去「基本信息」填一个职业名，比如「会计师」「记者」。</div>';
+      const filled = String(work.occupation || '').trim();
+      if (!filled) {
+        return '<div class="sk-budget empty">还没填职业，职业点无法计算。去「基本信息」填一个职业名，比如「会计师」「记者」。</div>';
+      }
+      // 填了但职业表里没有：给候选，别让玩家以为程序坏了
+      const sugg = suggestOccupations(filled);
+      const tail = sugg.length
+        ? `<div class="sk-suggest">最接近的标准职业：${sugg.map((s) => `<button type="button" class="sk-suggest-item" data-suggest="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join(' ')}</div>`
+        : '';
+      return `<div class="sk-budget empty" data-budget-unknown>
+        <div>「${escapeHtml(filled)}」不在职业表里，职业点无法计算。</div>
+        <div class="sk-suggest-hint">去「基本信息」改成标准职业名，或点下面任意一个替换。</div>
+        ${tail}
+      </div>`;
     }
+
     const over = b.occLeft < 0 || b.intLeft < 0;
     const cls = over ? 'sk-budget over' : 'sk-budget';
     return `
@@ -544,6 +560,16 @@ function openCharEditorImpl(ch, opts = {}) {
           const row = backdrop.querySelector(`[data-skillrow="${inp.dataset.custom}"]`);
           if (row) row.classList.toggle('is-occ', isOccSkill(inp.dataset.custom));
           refreshBudget();
+        };
+      });
+
+      // 点了「最接近的标准职业」就用它替换掉识别不了的职业名
+      backdrop.querySelectorAll('[data-suggest]').forEach((btn) => {
+        btn.onclick = () => {
+          work.occupation = btn.dataset.suggest;
+          const occInput = backdrop.querySelector('#fOcc');
+          if (occInput) occInput.value = work.occupation;
+          renderTab();
         };
       });
     }

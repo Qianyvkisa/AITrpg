@@ -253,7 +253,54 @@ export const OCCUPATIONS = [
   { name: "密探", credit: "30-70", pts: "EDU*2+MAX(APP*2,DEX*2)", fixed: ["乔装", "侦查", "历史", "图书馆使用", "导航", "心理学", "潜行", "聆听", "锁匠"], social: 1 },
 ];
 
-/** 按名字找职业；容忍「侦探」「演员」这类简称 */
+/**
+ * 别名表：把口语化的职业名映射到职业表里的标准名。
+ *
+ * 队友模板和 AI 车出来的卡常写「退伍军医」「大学讲师」这种叫法，
+ * 它们不在那 225 个标准名里。只做字符串匹配的话会查不到职业，
+ * 职业点直接算成 0，技能页还会显示「还没填职业」。
+ *
+ * 这里保留角色卡上原本的名字（人设更有味道），只在查表时换成标准职业。
+ */
+export const OCCUPATION_ALIASES = {
+  // 医疗
+  '退伍军医': '队医',
+  '军医': '队医',
+  '随队医生': '队医',
+  '护士长': '护士',
+  '急救员': '急诊医生/救援队员',
+  // 学术 / 教育
+  '大学讲师': '教授/学者',
+  '讲师': '教授/学者',
+  '大学教授': '教授（原作向）',
+  '教师': '外语教师',
+  '老师': '外语教师',
+  '图书馆员': '图书馆管理员（原作向）',
+  '图书管理员': '图书馆管理员（原作向）',
+  '博物馆员': '博物馆管理员',
+  // 体力 / 劳工
+  '码头工人': '劳工',
+  '搬运工': '劳工',
+  '装卸工': '劳工',
+  '建筑工人': '工匠',
+  '矿工': '工人-矿工',
+  '伐木工': '工人-伐木工',
+  '船员': '商船队船员',
+  '水手': '海员-民船海员',
+  // 治安 / 地下
+  '侦探': '私家侦探',
+  '刑警': '警方(原作向)-警探',
+  '巡警': '警方(原作向)-巡警',
+  '小混混': '罪犯-混混',
+  '打手': '罪犯-打手、暴徒',
+  '小偷': '罪犯-窃贼',
+  '杀手': '罪犯-刺客',
+  // 现代
+  '黑客': '黑客/骇客（现代）',
+  '程序员': '程序员、电子工程师（现代）'
+};
+
+/** 按名字找职业；容忍「侦探」「演员」这类简称，以及上表的别名 */
 export function findOccupation(name) {
   const n = String(name || '').trim();
   if (!n) return null;
@@ -261,10 +308,69 @@ export function findOccupation(name) {
   const exact = OCCUPATIONS.find((o) => o.name === n);
   if (exact) return exact;
 
+  // 别名要排在模糊匹配之前，否则「退伍军医」可能被别的规则先吃掉
+  const alias = OCCUPATION_ALIASES[n];
+  if (alias) {
+    const hit = OCCUPATIONS.find((o) => o.name === alias);
+    if (hit) return hit;
+  }
+
   const prefix = OCCUPATIONS.find((o) => o.name.startsWith(n));
   if (prefix) return prefix;
 
   return OCCUPATIONS.find((o) => o.name.includes(n)) || null;
+}
+
+/**
+ * 为识别不了职业名给出候选，供界面提示用。
+ *
+ * 不伪造点数：规则不能凭空编，宁可明确告诉玩家「这个名字不在表里」，
+ * 再给几个最接近的标准职业让他自己选。
+ *
+ * @param {string} name 玩家填的职业名
+ * @param {number} limit 最多返回几个
+ * @returns {string[]} 候选标准职业名
+ */
+export function suggestOccupations(name, limit = 5) {
+  const n = String(name || '').trim();
+  if (!n) return [];
+
+  const grams = (s) => {
+    const out = new Set();
+    for (let i = 0; i < s.length - 1; i++) out.add(s.slice(i, i + 2));
+    return out;
+  };
+
+  // 先按两字重合找相近的
+  const target = grams(n);
+  const scored = [];
+  for (const o of OCCUPATIONS) {
+    const og = grams(o.name);
+    let score = 0;
+    for (const g of target) if (og.has(g)) score++;
+    if (score > 0) scored.push({ name: o.name, score });
+  }
+
+  if (scored.length) {
+    return scored
+      .sort((a, b) => b.score - a.score || a.name.length - b.name.length)
+      .slice(0, limit)
+      .map((x) => x.name);
+  }
+
+  // 两字完全不沾边时退一步按单字重合，避免「赛博格」这种给不出任何候选
+  const singles = new Set(n);
+  const byChar = [];
+  for (const o of OCCUPATIONS) {
+    let score = 0;
+    for (const c of singles) if (o.name.includes(c)) score++;
+    if (score > 0) byChar.push({ name: o.name, score });
+  }
+
+  return byChar
+    .sort((a, b) => b.score - a.score || a.name.length - b.name.length)
+    .slice(0, limit)
+    .map((x) => x.name);
 }
 
 /** 单个项求值，如 "EDU*4"、"STR*2" */

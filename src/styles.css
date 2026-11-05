@@ -1057,6 +1057,16 @@ body::before {
 .sk-budget.over .sk-budget-item b,
 .sk-budget.over .sk-budget-item em { color: #d9705c; }
 
+/* 职业名不在表里时的候选提示 */
+.sk-suggest-hint { margin-top: 4px; font-size: 10.5px; color: var(--ink-faint); }
+.sk-suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.sk-suggest-item {
+  padding: 3px 8px; font-size: 11px; color: var(--ink);
+  background: rgba(255,255,255,.04); border: 1px solid var(--border);
+  border-radius: 3px; cursor: pointer;
+}
+.sk-suggest-item:hover { background: rgba(255,255,255,.09); border-color: var(--accent); }
+
 .field .pair { display: flex; align-items: center; gap: 6px; }
 .field .pair input {
   flex: 1; background: #0e1117; border: 1px solid var(--border); border-radius: 3px;
