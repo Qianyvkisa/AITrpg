@@ -1310,3 +1310,28 @@ select:disabled {
 ::-webkit-scrollbar-thumb:active {
   background: var(--accent-soft);
 }
+
+/* ---- 待掷骰卡片 ---- */
+/* 玩家角色的检定不自动掷，这里给一个按钮让玩家亲手掷。
+   按钮沿用全局 .btn 的黄铜配色，只补布局，避免和主按钮抢视觉重心。 */
+.roll-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.roll-btn {
+  font-size: 12.5px;
+  padding: 5px 18px;
+  letter-spacing: 1px;
+}
+.roll-hint {
+  font-size: 11px;
+  color: var(--ink-faint);
+  letter-spacing: .5px;
+}
+
+/* 掷骰中：按钮禁用态要能看出在等，不能像卡死 */
+.roll-btn:disabled {
+  opacity: .5;
+}

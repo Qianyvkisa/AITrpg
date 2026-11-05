@@ -5,7 +5,7 @@
 
 import { parseDirectives, difficultyToSkill, splitNarration } from '../src/core/protocol.js';
 import { GameEngine } from '../src/core/engine.js';
-import { getHandler, handledTypes, summarizeResults, resolveSkillValue } from '../src/core/directives.js';
+import { getHandler, handledTypes, summarizeResults, resolveSkillValue, rollPending } from '../src/core/directives.js';
 import { buildSnapshot, applySnapshot } from '../src/persistence.js';
 import { createInitialState } from '../src/state.js';
 import { escapeHtml, stripDirectivesForDisplay } from '../src/shared/text.js';
@@ -1311,6 +1311,131 @@ group('resolveSkillValue 技能名归一化', () => {
 
   // 前缀匹配兜底
   eq(resolveSkillValue(ch, '格斗：刀'), 60, '「格斗：刀」前缀匹配到格斗');
+});
+
+// ---------------------------------------------------------------------------
+// 玩家手动掷骰（CHECK / SAN 的待掷骰流程）
+//
+// 背景：玩家角色的检定不再由程序直接掷，而是先登记成 pending，
+// 等玩家点「掷骰」按钮才真正结算。队友 / NPC 仍然自动掷。
+// 这些用例锁住三件事：玩家必须等、队友不能等、掷完不能重复掷。
+// ---------------------------------------------------------------------------
+function makeRollCtx() {
+  const player = createCharacter({ name: '玩家甲', isPlayer: true });
+  const mate = createCharacter({ name: '队友乙', isPlayer: false });
+  player.skills['侦查'] = 60;
+  mate.skills['侦查'] = 60;
+  player.attrs.POW = 50;
+  mate.attrs.POW = 50;
+  player.san.current = 60;
+  mate.san.current = 60;
+
+  const msgs = [];
+  const state = {
+    playerChar: player,
+    teammates: [mate],
+    scenario: { scene: '', events: [], clues: [], secrets: [], notes: '', ended: false, ending: '' },
+    messages: msgs
+  };
+  const ctx = {
+    state,
+    findChar: (n) => (n === '玩家甲' ? player : n === '队友乙' ? mate : null),
+    pushMessage: (m) => {
+      const x = { id: 'm' + msgs.length, ...m };
+      msgs.push(x);
+      return x;
+    },
+    updateMessage: (id, patch) => {
+      const x = msgs.find((m) => m.id === id);
+      if (x) Object.assign(x, patch);
+      return x;
+    }
+  };
+  return { ctx, state, player, mate, msgs };
+}
+
+group('玩家 CHECK 登记为待掷骰，不立即结算', () => {
+  const { ctx, player } = makeRollCtx();
+  const h = getHandler('CHECK');
+  const r = h(ctx, { head: '侦查', opts: {}, type: 'CHECK' });
+
+  eq(r.status, 'pending', '返回状态是待掷骰');
+  eq(r.kind, 'check', '类型正确');
+  eq(r.result, undefined, '尚未产生骰点结果');
+  eq(r.adjusted, 60, '目标值按技能算出');
+  ok(r.messageId, '有对应的占位消息 id');
+  // 技能值本身不能被改动
+  eq(player.skills['侦查'], 60, '掷骰前技能值不变');
+});
+
+group('玩家 CHECK 掷骰后产出真实结果并回填消息', () => {
+  const { ctx, msgs } = makeRollCtx();
+  const h = getHandler('CHECK');
+  const pending = h(ctx, { head: '侦查', opts: {}, type: 'CHECK' });
+
+  const r = rollPending(ctx, pending);
+  eq(r.kind, 'check', '结算类型');
+  ok(r.roll && r.roll.value >= 1 && r.roll.value <= 100, '骰点在 1~100');
+  ok(r.level && r.level.label, '有成功等级');
+  eq(pending.status, 'rolled', '状态转为已掷');
+
+  const msg = msgs.find((m) => m.id === pending.messageId);
+  eq(msg.data.status, 'rolled', '消息里的数据同步为已掷');
+  ok(String(msg.text).includes('检定结果'), '消息文本换成结果');
+});
+
+group('同一次待掷骰不能重复掷', () => {
+  const { ctx } = makeRollCtx();
+  const h = getHandler('CHECK');
+  const pending = h(ctx, { head: '侦查', opts: {}, type: 'CHECK' });
+
+  rollPending(ctx, pending);
+  const again = rollPending(ctx, pending);
+  eq(again, null, '第二次掷骰被拒绝');
+});
+
+group('队友 CHECK 自动掷骰，不进入待掷骰', () => {
+  const { ctx, msgs } = makeRollCtx();
+  const h = getHandler('CHECK');
+  const r = h(ctx, { head: '侦查', opts: { 角色: '队友乙' }, type: 'CHECK' });
+
+  eq(r.kind, 'check', '结算类型');
+  ok(r.roll, '已产生骰点');
+  eq(r.status, 'rolled', '自动掷骰直接是已掷状态，不留在 pending');
+  ok(msgs.some((m) => m.role === 'roll' && m.data && m.data.status !== 'pending'), '已生成结果消息');
+});
+
+group('玩家 SAN 登记待掷骰，掷骰前不扣理智', () => {
+  const { ctx, player } = makeRollCtx();
+  const h = getHandler('SAN');
+  const p = h(ctx, { head: '1/1d6', opts: {}, type: 'SAN' });
+
+  eq(p.status, 'pending', '待掷骰');
+  eq(p.kind, 'san', '类型为 san');
+  eq(player.san.current, 60, '掷骰前 SAN 不变');
+});
+
+group('玩家 SAN 掷骰后按 POW 判定并扣理智', () => {
+  const { ctx, player } = makeRollCtx();
+  const h = getHandler('SAN');
+  const p = h(ctx, { head: '1/1d6', opts: {}, type: 'SAN' });
+
+  const r = rollPending(ctx, p);
+  ok(r.powRoll, '有 POW 骰点');
+  ok(typeof r.loss === 'number' && r.loss >= 0, '损失为非负数');
+  eq(r.before, 60, '记录扣减前的 SAN');
+  eq(player.san.current, 60 - r.loss, 'SAN 已按损失扣减');
+});
+
+group('队友 SAN 自动结算，不进入待掷骰', () => {
+  const { ctx, mate } = makeRollCtx();
+  const h = getHandler('SAN');
+  const before = mate.san.current;
+  const r = h(ctx, { head: '1/1d6', opts: { 角色: '队友乙' }, type: 'SAN' });
+
+  eq(r.kind, 'san', '结算类型');
+  ok(r.loss >= 0, '有损失数值');
+  eq(mate.san.current, before - r.loss, 'SAN 已扣减');
 });
 
 // ---------------------------------------------------------------------------

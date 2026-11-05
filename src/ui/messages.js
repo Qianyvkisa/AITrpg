@@ -124,6 +124,31 @@ export function renderMessage(msg) {
   }
 
   wrap.appendChild(bubble);
+
+  // 待掷骰：玩家角色自己的检定不自动掷，给一个按钮让玩家亲手掷
+  if (msg.role === 'roll' && msg.data && msg.data.status === 'pending') {
+    const bar = document.createElement('div');
+    bar.className = 'roll-action';
+
+    const btn = document.createElement('button');
+    btn.className = 'btn roll-btn';
+    btn.type = 'button';
+    btn.dataset.rollId = msg.data.id;
+    btn.textContent = '掷骰';
+
+    // 显示奖励/惩罚骰信息，让玩家掷之前就知道条件
+    const hint = document.createElement('span');
+    hint.className = 'roll-hint';
+    const bits = [];
+    if (msg.data.bonus > 0) bits.push(`奖励骰 ×${msg.data.bonus}`);
+    if (msg.data.penalty > 0) bits.push(`惩罚骰 ×${msg.data.penalty}`);
+    hint.textContent = bits.join('　');
+
+    bar.appendChild(btn);
+    if (hint.textContent) bar.appendChild(hint);
+    wrap.appendChild(bar);
+  }
+
   box()?.appendChild(wrap);
   return wrap;
 }
@@ -186,6 +211,27 @@ export function renderAllMessages(messages) {
   m.innerHTML = '';
   for (const msg of messages) renderMessage(msg);
   scrollToBottom({ force: true });
+}
+
+/**
+ * 重绘单条消息（掷骰后把「待掷骰」卡片换成结果卡片）。
+ *
+ * 不能复用 applyCleanText：那条路径只在 message.clean 存在时才工作，
+ * 而掷骰结果消息没有 clean 字段。这里直接整条替换 DOM，
+ * 顺便保证按钮被移除、结果气泡按成功等级重新着色。
+ */
+export function replaceMessage(msg) {
+  const el = findMsgEl(msg.id);
+  if (!el) return renderMessage(msg);
+
+  const fresh = renderMessage(msg);
+  if (fresh) {
+    el.replaceWith(fresh);
+  } else {
+    // 新版本不可见（理论上不会发生），移除旧节点避免残留按钮
+    el.remove();
+  }
+  return fresh;
 }
 
 // ---------------------------------------------------------------------------

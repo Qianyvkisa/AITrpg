@@ -9,7 +9,7 @@
 import { parseDirectives, splitNarration } from './protocol.js';
 import { keeperSystemPrompt } from './prompts.js';
 import { characterToPrompt } from './character.js';
-import { getHandler, summarizeResults } from './directives.js';
+import { getHandler, summarizeResults, rollPending } from './directives.js';
 
 /** 单轮最多自动续跑几次，防止 AI 反复请求检定导致无限循环 */
 const MAX_CHAIN = 3;
@@ -40,6 +40,18 @@ export class GameEngine {
     };
     this.state.messages.push(m);
     this.emit({ type: 'message', message: m });
+    return m;
+  }
+
+  /**
+   * 就地更新一条已有消息（玩家掷骰后把「待掷骰」占位换成真实结果）。
+   * 只改传入的字段，其余保留，避免把 id / ts 冲掉。
+   */
+  updateMessage(id, patch) {
+    const m = this.state.messages.find((x) => x.id === id);
+    if (!m) return null;
+    Object.assign(m, patch);
+    this.emit({ type: 'message-updated', message: m });
     return m;
   }
 
@@ -164,14 +176,57 @@ export class GameEngine {
       }
     }
 
-    // 把结算结果回喂给 KP（下一轮它才知道骰点）
+    // 有待玩家掷骰的检定时，先不把结果回喂给 KP。
+    // 否则 KP 会在玩家还没掷骰时就「叙述」一个还没发生的结果，
+    // 造成叙事和真实骰点对不上。等玩家掷完再由 rollAndResume 续跑。
+    const pending = this.pendingRolls();
+    if (pending.length) {
+      this.state.awaitingRoll = true;
+      this.emit({ type: 'state-changed' });
+      this.emit({ type: 'roll-pending', pending });
+      return;
+    }
+
+    this.feedBackResults(results);
+    this.emit({ type: 'state-changed' });
+  }
+
+  /** 把结算结果回喂给 KP */
+  feedBackResults(results) {
     const summary = summarizeResults(results);
     if (summary) {
       this.pushMessage({ role: 'system-result', text: summary, hidden: true });
     }
+  }
 
-    // 任何指令（包括线索、场景切换）都要刷新界面
+  /** 当前所有等待玩家掷骰的检定 */
+  pendingRolls() {
+    return this.state.messages
+      .filter((m) => m.role === 'roll' && m.data && m.data.status === 'pending')
+      .map((m) => m.data);
+  }
+
+  /**
+   * 玩家点「掷骰」后调用：掷骰、结算、把结果回喂 KP 并续跑叙述。
+   * @param {string} pendingId 待掷骰的 id
+   */
+  async rollAndResume(pendingId) {
+    const target = this.pendingRolls().find((p) => p.id === pendingId);
+    if (!target) return null;
+
+    const r = rollPending(this.context(), target);
     this.emit({ type: 'state-changed' });
+
+    // 还有别的待掷骰就继续等，不要提前续跑
+    if (this.pendingRolls().length) return r;
+
+    this.state.awaitingRoll = false;
+    this.feedBackResults([r]);
+    this.emit({ type: 'state-changed' });
+
+    // 让 KP 接着叙述这次检定的后果
+    await this.runKeeper();
+    return r;
   }
 
   /** 给指令处理器用的上下文，避免它们直接依赖 engine 实例 */
@@ -179,7 +234,8 @@ export class GameEngine {
     return {
       state: this.state,
       findChar: (name) => this.findChar(name),
-      pushMessage: (msg) => this.pushMessage(msg)
+      pushMessage: (msg) => this.pushMessage(msg),
+      updateMessage: (id, patch) => this.updateMessage(id, patch)
     };
   }
 
@@ -193,10 +249,20 @@ export class GameEngine {
   /**
    * 一轮完整交互：玩家行动 → KP 叙述 → 若产生检定则自动续跑叙述结果。
    * 续跑有次数上限。之后按配置让队友自发接话。
+   *
+   * 注意：如果产生了「等待玩家掷骰」的检定，本轮到此为止，
+   * 不再自动续跑，也不再让队友插话——否则 KP 会在骰点还没掷出时
+   * 就叙述一个虚构的结果。玩家掷完骰后由 rollAndResume 接着跑。
    */
   async takeTurn(text) {
     const before = this.state.messages.length;
     await this.playerAction(text);
+
+    // 有玩家待掷骰：交给界面等玩家点按钮
+    if (this.pendingRolls().length) {
+      this.emit({ type: 'state-changed' });
+      return 0;
+    }
 
     let chain = 0;
     while (chain < MAX_CHAIN) {

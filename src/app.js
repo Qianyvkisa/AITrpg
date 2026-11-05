@@ -19,7 +19,8 @@ import {
   initMessageScroll,
   scheduleStreamUpdate,
   endStreamingBubble,
-  applyCleanText
+  applyCleanText,
+  replaceMessage
 } from './ui/messages.js';
 import { openSettings, openModules, openCharEditor, openTeammateCreator, openSaves, openGameSetup } from './modals/index.js';
 import { hasRunTurn, menuButtonVisibility } from './ui/menu.js';
@@ -53,6 +54,8 @@ function enterGame() {
   renderAll(state, panelHandlers);
   renderScene(state);
   applyModeToComposer();
+  // 读档进来时可能还有没掷的骰，要把输入区锁上
+  updateRollGate();
   scrollToBottom({ force: true });
   $('#input')?.focus();
 }
@@ -176,11 +179,23 @@ function handleEngineEvent(ev) {
       break;
 
     case 'message-updated':
-      applyCleanText(ev.message);
+      // 掷骰结果消息没有 clean 字段，applyCleanText 会直接跳过，
+      // 这种情况走整条重绘，顺便把「掷骰」按钮移除
+      if (ev.message && ev.message.clean === undefined) {
+        replaceMessage(ev.message);
+      } else {
+        applyCleanText(ev.message);
+      }
+      break;
+
+    case 'roll-pending':
+      // 有玩家待掷骰：把输入框暂时锁住，提示先掷骰再继续
+      updateRollGate();
       break;
 
     case 'state-changed':
       renderAll(state, panelHandlers);
+      updateRollGate();
       break;
 
     default:
@@ -198,6 +213,64 @@ const panelHandlers = {
     renderAll(state, panelHandlers);
   }
 };
+
+// ---------------------------------------------------------------------------
+// 待掷骰：玩家亲手掷骰
+// ---------------------------------------------------------------------------
+
+/** 当前是否有玩家待掷骰 */
+function hasPendingRoll() {
+  return state.messages.some(
+    (m) => m.role === 'roll' && m.data && m.data.status === 'pending'
+  );
+}
+
+/**
+ * 有待掷骰时锁住输入区。
+ * 理由：骰点还没掷出就让玩家继续行动，KP 会在下一轮基于「未发生的结果」
+ * 继续叙述，故事线会和真实骰点错位。
+ */
+function updateRollGate() {
+  const sendBtn = $('#btnSend');
+  const input = $('#input');
+  const pending = hasPendingRoll();
+  state.awaitingRoll = pending;
+
+  if (sendBtn) {
+    sendBtn.disabled = pending || busy;
+    sendBtn.textContent = pending ? '先掷骰' : (state.mode === 'spectator' ? '推进' : '行动');
+  }
+  if (input) {
+    input.disabled = pending;
+    input.placeholder = pending
+      ? '请先点「掷骰」完成上面的检定…'
+      : '描述你的行动…';
+  }
+}
+
+/** 处理掷骰按钮点击 */
+async function handleRollClick(rollId) {
+  if (!rollId || busy) return;
+  if (!engine) return;
+
+  const target = engine.pendingRolls().find((p) => p.id === rollId);
+  if (!target) return;
+
+  busy = true;
+  updateRollGate();
+
+  try {
+    await engine.rollAndResume(rollId);
+    await autoSave();
+  } catch (e) {
+    console.error(e);
+    engine.pushMessage({ role: 'system', text: `【掷骰失败】${e.message}` });
+  } finally {
+    busy = false;
+    updateRollGate();
+    scrollToBottom();
+  }
+}
 
 // ---------------------------------------------------------------------------
 // 初始化
@@ -259,6 +332,17 @@ function bindUI() {
   $('#btnSaves').onclick = openSaveDialog;
 
   $('#btnSend').onclick = () => (state.mode === 'spectator' ? spectatorAdvance() : sendAction());
+
+  // 掷骰按钮：用事件委托，避免每渲染一条待掷骰消息就重新绑一次
+  const messagesBox = $('#messages');
+  if (messagesBox) {
+    messagesBox.addEventListener('click', (e) => {
+      const btn = e.target.closest('.roll-btn');
+      if (!btn) return;
+      e.preventDefault();
+      handleRollClick(btn.dataset.rollId);
+    });
+  }
   $('#input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -371,6 +455,12 @@ async function abandonGame() {
 // ---------------------------------------------------------------------------
 async function sendAction() {
   if (busy) return;
+
+  // 有未掷的骰：先掷完再继续行动，否则 KP 会基于未定的结果往下叙述
+  if (hasPendingRoll()) {
+    alert('请先点消息里的「掷骰」按钮，把这次检定掷完。');
+    return;
+  }
 
   const input = $('#input');
   const text = input.value.trim();

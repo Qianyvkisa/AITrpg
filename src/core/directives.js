@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 import { rollD100, rollDice, successLevel, expandDb } from './dice.js';
 import { difficultyToSkill, formatCheckResult, formatSanResult } from './protocol.js';
-import { applySanCheck, checkInsanity } from './sanity.js';
+import { applySanCheck, checkInsanity, parseSanLoss } from './sanity.js';
 
 const handlers = new Map();
 
@@ -108,7 +108,147 @@ export function resolveSkillValue(ch, rawName) {
 }
 
 // ---------------------------------------------------------------------------
+// 待掷骰队列 —— 玩家手动掷骰的支撑
+//
+// 设计要点：
+//   1. 玩家角色的检定不立即掷骰，而是先登记成一条 pending，交给界面显示「掷骰」按钮。
+//      骰点仍在 dice.js 里生成，AI 无法编造结果，只是把「什么时候掷」的决定权还给玩家。
+//   2. 队友 / NPC 的检定仍然自动掷，因为它们是 AI 操控的，玩家不该替它们点按钮。
+//   3. 结算逻辑抽成 rollPending()，手动掷骰和自动掷骰走同一段代码，
+//      避免两套路径算出不同结果。
+// ---------------------------------------------------------------------------
+
+/** 该角色是否由玩家亲自操控 */
+function isPlayerChar(ctx, ch) {
+  if (!ch) return false;
+  if (ch.isPlayer) return true;
+  // 兜底：玩家角色对象与 state.playerChar 是同一个
+  return ch === ctx.state.playerChar;
+}
+
+/**
+ * 把一个检定登记为「等待玩家掷骰」。
+ * @returns {object} 与原来 CHECK 返回值同形的占位结果
+ */
+function deferCheck(ctx, { who, skillName, difficulty, base, adjusted, bonus, penalty, reason }) {
+  const pending = {
+    id: 'roll-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+    kind: 'check',
+    who, skill: skillName, difficulty,
+    baseSkill: base ?? 5, adjusted,
+    bonus, penalty, reason,
+    status: 'pending'
+  };
+
+  const msg = ctx.pushMessage({
+    role: 'roll',
+    text: `【待掷骰】${who} · ${skillName}${difficulty !== '常规' ? `（${difficulty}）` : ''}　目标值 ${adjusted}${reason ? '：' + reason : ''}`,
+    data: pending
+  });
+
+  // 记录到消息上，玩家点按钮后要按这条消息回填结果
+  pending.messageId = msg.id;
+  return pending;
+}
+
+/**
+ * 执行一条待掷骰，回填结果。
+ * 手动掷骰与自动掷骰都走这里，保证两条路径结算一致。
+ */
+export function rollPending(ctx, pending) {
+  if (!pending || pending.status !== 'pending') return null;
+
+  const ch = ctx.findChar(pending.who);
+  if (!ch) return null;
+
+  pending.status = 'rolled';
+
+  if (pending.kind === 'check') {
+    const roll = rollD100({ bonus: pending.bonus, penalty: pending.penalty });
+    const level = successLevel(roll.value, pending.adjusted);
+
+    const r = {
+      kind: 'check',
+      who: pending.who, skill: pending.skill, difficulty: pending.difficulty,
+      baseSkill: pending.baseSkill, adjusted: pending.adjusted,
+      roll, level, reason: pending.reason,
+      // 结果对象自带 status，回填到消息后界面据此判断不再显示「掷骰」按钮
+      status: 'rolled'
+    };
+    pending.result = r;
+
+    // 只有玩家手动掷骰才有占位消息可回填；自动掷骰时 messageId 为空
+    if (pending.messageId) {
+      ctx.updateMessage(pending.messageId, { text: formatCheckResult(r), data: r, pending: false });
+    }
+    ctx.state.scenario.events.push(
+      `${pending.who} ${pending.skill}检定 → ${level.label}（${roll.value}/${pending.adjusted}）`
+    );
+    return r;
+  }
+
+  if (pending.kind === 'san') {
+    const roll = rollD100({});
+    const level = successLevel(roll.value, ch.attrs.POW);
+    const sanResult = applySanCheck(ch, pending.lossExpr, roll, level);
+
+    const r = {
+      kind: 'san',
+      who: pending.who, reason: pending.reason, lossExpr: pending.lossExpr,
+      powRoll: roll, powLevel: level,
+      status: 'rolled',
+      ...sanResult
+    };
+    pending.result = r;
+
+    // 自动掷骰（队友/NPC）没有占位消息，此时 messageId 为空，跳过回填
+    if (pending.messageId) {
+      ctx.updateMessage(pending.messageId, { text: formatSanResult(r), data: r, pending: false });
+    }
+    ctx.state.scenario.events.push(
+      `${pending.who} 理智检定：损失 ${sanResult.loss} 点（${sanResult.before}→${sanResult.after}）`
+    );
+
+    // 疯狂状态检查
+    const ins = checkInsanity(ch);
+    if (ins.note) {
+      ctx.pushMessage({ role: 'system', text: `【状态】${pending.who}：${ins.note}` });
+    }
+
+    // 临时疯狂 → 需要 INT 检定（7e：INT 检定失败 → 陷入疯狂发作）
+    if (sanResult.needsIntCheck) {
+      const intRoll = rollD100({});
+      const intLevel = successLevel(intRoll.value, ch.attrs.INT);
+      const bout = !intLevel.ok;
+
+      r.intRoll = intRoll;
+      r.intLevel = intLevel;
+      r.boutTriggered = bout;
+
+      if (bout) {
+        if (!ch.status.includes('临时疯狂')) ch.status.push('临时疯狂');
+        ctx.pushMessage({
+          role: 'system',
+          text: `【疯狂发作】${pending.who} 的理智遭到冲击，INT 检定失败（${intRoll.value}/${ch.attrs.INT}），陷入疯狂发作。`
+        });
+      } else {
+        ctx.pushMessage({
+          role: 'system',
+          text: `【强撑】${pending.who} 勉强维持住了自我（INT 检定成功 ${intRoll.value}/${ch.attrs.INT}），但精神已受重创。`
+        });
+      }
+    }
+    return r;
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // CHECK —— 技能检定
+//
+// 玩家角色：登记待掷骰，等玩家点「掷骰」按钮（见 rollPending）
+// 队友 / NPC：自动掷，玩家只观看
 // ---------------------------------------------------------------------------
 define('CHECK', (ctx, d) => {
   const who = d.opts['角色'] || ctx.state.playerChar?.name || '调查员';
@@ -126,19 +266,11 @@ define('CHECK', (ctx, d) => {
 
   const bonus = Number(d.opts['奖励'] || 0);
   const penalty = Number(d.opts['惩罚'] || 0);
-  const roll = rollD100({ bonus, penalty });
-  const level = successLevel(roll.value, adjusted);
+  const reason = d.opts['原因'] || '';
 
-  const r = {
-    kind: 'check',
-    who, skill: skillName, difficulty,
-    baseSkill: skillValue, adjusted, roll, level,
-    reason: d.opts['原因'] || ''
-  };
+  const params = { who, skillName, difficulty, base, adjusted, bonus, penalty, reason };
 
-  ctx.pushMessage({ role: 'roll', text: formatCheckResult(r), data: r });
-  ctx.state.scenario.events.push(`${who} ${skillName}检定 → ${level.label}（${roll.value}/${adjusted}）`);
-
+  // 缺技能提示：无论手动还是自动都要告诉玩家
   if (base === undefined) {
     ctx.pushMessage({
       role: 'system',
@@ -146,11 +278,25 @@ define('CHECK', (ctx, d) => {
     });
   }
 
+  // 玩家角色 → 等待玩家亲自掷骰
+  if (isPlayerChar(ctx, ch)) {
+    return deferCheck(ctx, params);
+  }
+
+  // 队友 / NPC → 自动掷（走统一的结算函数）
+  const autoPending = { kind: 'check', who, skill: skillName, difficulty, baseSkill: skillValue, adjusted, bonus, penalty, reason, status: 'pending' };
+  const r = rollPending(ctx, autoPending);
+  if (r) {
+    ctx.pushMessage({ role: 'roll', text: formatCheckResult(r), data: r });
+  }
   return r;
 });
 
 // ---------------------------------------------------------------------------
 // SAN —— 理智检定
+//
+// 与 CHECK 同理：玩家角色由玩家亲手掷骰，队友 / NPC 自动掷。
+// 结算统一走 rollPending()，保证两条路径的疯狂判定完全一致。
 // ---------------------------------------------------------------------------
 define('SAN', (ctx, d) => {
   const who = d.opts['角色'] || ctx.state.playerChar?.name;
@@ -160,53 +306,32 @@ define('SAN', (ctx, d) => {
   const lossExpr = d.head;
   const reason = d.opts['原因'] || '';
 
-  // SAN 检定本身是一次 POW 检定
-  const roll = rollD100({});
-  const level = successLevel(roll.value, ch.attrs.POW);
-  const sanResult = applySanCheck(ch, lossExpr, roll, level);
-
-  const r = {
-    kind: 'san',
-    who, reason, lossExpr,
-    powRoll: roll, powLevel: level,
-    ...sanResult
-  };
-
-  ctx.pushMessage({ role: 'roll', text: formatSanResult(r), data: r });
-  ctx.state.scenario.events.push(
-    `${who} 理智检定：损失 ${sanResult.loss} 点（${sanResult.before}→${sanResult.after}）`
-  );
-
-  // 疯狂状态检查
-  const ins = checkInsanity(ch);
-  if (ins.note) {
-    ctx.pushMessage({ role: 'system', text: `【状态】${who}：${ins.note}` });
+  // 玩家角色 → 等待玩家亲自掷骰
+  if (isPlayerChar(ctx, ch)) {
+    const { onSuccess, onFailure } = parseSanLoss(lossExpr);
+    const pending = {
+      id: 'roll-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+      kind: 'san',
+      who, lossExpr, reason,
+      status: 'pending'
+    };
+    const msg = ctx.pushMessage({
+      role: 'roll',
+      text: `【待掷骰】${who} · 理智检定　损失 ${lossExpr}${reason ? '：' + reason : ''}`,
+      data: pending
+    });
+    pending.messageId = msg.id;
+    return pending;
   }
 
-  // 临时疯狂 → 需要 INT 检定（7e：INT 检定失败 → 陷入疯狂发作）
-  if (sanResult.needsIntCheck) {
-    const intRoll = rollD100({});
-    const intLevel = successLevel(intRoll.value, ch.attrs.INT);
-    const bout = !intLevel.ok;
+  // 队友 / NPC → 自动掷（交给统一的结算函数）
+  const pending = { kind: 'san', who, lossExpr, reason, status: 'pending' };
+  const r = rollPending(ctx, pending);
 
-    r.intRoll = intRoll;
-    r.intLevel = intLevel;
-    r.boutTriggered = bout;
-
-    if (bout) {
-      if (!ch.status.includes('临时疯狂')) ch.status.push('临时疯狂');
-      ctx.pushMessage({
-        role: 'system',
-        text: `【疯狂发作】${who} 的理智遭到冲击，INT 检定失败（${intRoll.value}/${ch.attrs.INT}），陷入疯狂发作。`
-      });
-    } else {
-      ctx.pushMessage({
-        role: 'system',
-        text: `【强撑】${who} 勉强维持住了自我（INT 检定成功 ${intRoll.value}/${ch.attrs.INT}），但精神已受重创。`
-      });
-    }
+  // 自动掷骰时没有对应的占位消息，这里补发结果消息
+  if (r) {
+    ctx.pushMessage({ role: 'roll', text: formatSanResult(r), data: r });
   }
-
   return r;
 });
 
