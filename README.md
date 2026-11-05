@@ -4,24 +4,9 @@
 
 ## 直接运行
 
-双击 `dist\COC跑团 0.1.0.exe` 即可。
+双击 `COC跑团.exe` 即可。
 
 这个 exe 是便携版：不需要安装，不需要 Node 环境，不依赖项目里的任何其他文件，复制到任意目录都能运行。首次启动会在临时目录里自解压，大约需要 10~20 秒，之后启动更快。
-
-## 开发时运行
-
-改完代码想立刻看效果，用：
-
-```powershell
-.\start.ps1
-```
-
-`start.ps1` 会先摘掉 `ELECTRON_RUN_AS_NODE` 环境变量（它会让 Electron 退化成纯 Node 解释器，表现为双击没反应），再用 `dist\win-unpacked` 里的 Electron 运行时加载**当前源码目录**，所以改动立即生效，不需要重新打包。
-
-> `dist\win-unpacked` 必须保留：`start.ps1` 用它当运行时，重新打包也会更新它。
-> `node_modules` 里那份 Electron 带 Low 完整性标签，写不了数据目录，无法用来启动。
-
-改了代码之后要更新 exe，运行 `pnpm dist` 重新打包。
 
 ## 界面结构
 
@@ -136,7 +121,7 @@ electron/              主进程模块
   llm.js               LLM 请求、流式推送、请求取消
   moduleAI.js          把导入的模组材料整理成「公开简介 + 内部真相」
   materials.js         模组材料解析（txt/md/docx/pdf/图片）
-  ipc-files.js         存档 / 模组 / 通用存储 IPC
+  ipc-files.js         存档 / 模组 / 角色卡库 / 通用存储 IPC
   window.js            窗口创建与生命周期
 src/
   index.html           界面骨架（主界面 + 跑团界面）
@@ -157,11 +142,12 @@ src/
     index.js           统一出口
     settings.js        设置
     modules.js         模组管理
-    gameSetup.js       开局设定（模组选择 + 参与方式 + 角色卡 + 公开简介）
+    gameSetup.js       开局设定（模组选择 + 参与方式 + 角色卡 + 伙伴 + 公开简介）
     charEditor.js      角色编辑
+    charLibrary.js     角色卡库（玩家 / AI 两库分开）
     teammateCreator.js 队友创建
     modelPicker.js     模型选择
-    saves.js           存档
+    saves.js           存档（含从存档提取角色卡）
   core/                规则内核（与界面无关，可单测）
     dice.js            骰子、奖励/惩罚骰、成功等级
     character.js       角色卡与派生值
@@ -174,50 +160,12 @@ src/
     moduleInfo.js      模组公开简介的结构与校验
     builtinModules.js  内置示例模组
 tests/
-  rules.test.mjs       规则引擎单元测试（138 项）
-  unit.test.mjs        协议/指令/存档/SSE 单元测试（476 项）
-  charEditor.smoke.mjs 角色编辑器与设定界面冒烟测试（41 项）
-tools/
-  dev-server.mjs       开发用静态服务器（浏览器里跑界面验证页）
-  ui/index.html        界面布局验证页（设定界面 / 跑团界面）
-  ui/bench.html        流式渲染性能基准
-  ui/bench-main.cjs    在真实窗口里跑性能基准（Electron）
+  rules.test.mjs       规则引擎单元测试
+  unit.test.mjs        协议/指令/存档/SSE 单元测试
+  charEditor.smoke.mjs 角色编辑器冒烟测试
 ```
 
 分层原则：`core/` 不碰 DOM 与 Electron，`ui/` 只读状态写 DOM，`services/` 只发请求，`app.js` 只做装配。
-
-## 开发
-
-```powershell
-.\start.ps1                  # 启动开发版
-npm test                     # 跑全部测试（655 项）
-node tests\rules.test.mjs    # 只跑规则测试（138 项）
-node tests\unit.test.mjs     # 只跑协议/工具测试（476 项）
-```
-
-### 界面布局验证
-
-改样式时不必反复启动程序：先起静态服务，再用浏览器打开验证页。
-
-```powershell
-node tools\dev-server.mjs            # 默认 127.0.0.1:8931
-```
-
-- `tools/ui/index.html?view=setup` —— 开局设定界面
-- `tools/ui/index.html?view=game` —— 跑团界面（三栏）
-- 加 `&measure=1` 会把实测几何写进页面，可用无头浏览器 `--dump-dom` 抓取核对
-
-### 性能基准
-
-流式渲染的合帧行为（每帧最多写一次 DOM）在 `src/ui/messages.js` 里实现。
-基准页要在**真实显示窗口**里跑，因为被测代码靠 `requestAnimationFrame` 合帧，
-而隐藏窗口、后台标签、无头浏览器的 `--virtual-time-budget` 都会把 rAF 节流甚至饿死，
-测出来的耗时和写入次数不可信（基准页会自检并标注 `trustworthy: false`）。
-
-```powershell
-node_modules\electron\dist\electron.exe tools\ui\bench-main.cjs
-```
-
 
 ## 关于 AI 接口的说明
 
