@@ -28,6 +28,7 @@ export function buildSnapshot(state) {
     state: {
       playerChar: state.playerChar,
       teammates: state.teammates,
+      companions: state.companions || [],
       messages: state.messages,
       scenario: state.scenario,
       module: state.module,
@@ -46,6 +47,8 @@ export function applySnapshot(state, snapshot) {
 
   state.playerChar = s.playerChar || null;
   state.teammates = s.teammates || [];
+  // 老存档没有伙伴这一层，给空数组兜底
+  state.companions = Array.isArray(s.companions) ? s.companions : [];
   state.messages = s.messages || [];
   state.scenario = s.scenario || state.scenario;
   state.module = s.module || null;

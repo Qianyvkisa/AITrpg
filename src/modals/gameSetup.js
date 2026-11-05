@@ -18,6 +18,7 @@ import { moduleInfoFor } from '../core/moduleInfo.js';
 import { createDefaultCharacter } from '../state.js';
 import { openCharEditor } from './charEditor.js';
 import { randomCharacter } from '../services/charGen.js';
+import { pickCharFromLibrary, saveCharToLibrary } from './charLibrary.js';
 
 /**
  * 打开设定界面。
@@ -37,6 +38,11 @@ export async function openGameSetup({ onStart, state = null, api = null }) {
   // 角色卡：玩家 1 张 + 最多 4 位队友
   let playerChar = createDefaultCharacter();
   let teammates = [createTeammate(0)];
+
+  // 调查员伙伴：从角色卡库挑来的后备力量。
+  // 跟「队友」不同——队友全程跟着队伍，伙伴留在外面，
+  // 需要时由 KP 判断能不能赶来支援。
+  let companions = [];
 
   const { backdrop, close } = openModal(`
     <div class="modal setup-modal">
@@ -89,9 +95,24 @@ export async function openGameSetup({ onStart, state = null, api = null }) {
           </section>
 
           <section class="field-group" id="charSection">
-            <h3>角色卡 <span class="hint">手动填写 / 随机骰点 / 让 AI 生成</span></h3>
+            <h3>角色卡 <span class="hint">手动填写 / 随机骰点 / 让 AI 生成 / 从库导入</span></h3>
             <div class="char-card-list" id="charCardList"></div>
             <div class="hint">点「编辑」打开完整角色卡（含技能表、背景故事、装备与经历）</div>
+          </section>
+
+          <section class="field-group" id="companionSection">
+            <h3>
+              调查员伙伴
+              <span class="hint">从角色卡库挑人，需要时赶来支援</span>
+            </h3>
+            <div class="companion-list" id="companionList"></div>
+            <div class="companion-actions">
+              <button class="btn ghost sm" id="btnAddCompanion">+ 添加伙伴</button>
+            </div>
+            <div class="hint">
+              伙伴不随队行动。剧情上需要人手时，KP 会判断他们能否及时赶到
+              （看距离、处境和他们的状态），能来就让他们登场支援。
+            </div>
           </section>
 
         </div>
@@ -210,7 +231,7 @@ export async function openGameSetup({ onStart, state = null, api = null }) {
   // 角色卡列表
   // -------------------------------------------------------------------------
   /** 一张卡的摘要行 */
-  const charRow = (ch, { label, onEdit, onRandom, onRemove }) => {
+  const charRow = (ch, { label, onEdit, onRandom, onImport, onSaveToLib, onRemove }) => {
     const d = ch.derived || {};
     const el = document.createElement('div');
     el.className = 'char-row';
@@ -223,11 +244,15 @@ export async function openGameSetup({ onStart, state = null, api = null }) {
       <div class="cr-actions">
         <button class="btn ghost sm" data-act="edit">编辑</button>
         <button class="btn ghost sm" data-act="random">随机</button>
+        ${onImport ? '<button class="btn ghost sm" data-act="import" title="从角色卡库挑一张">导入</button>' : ''}
+        ${onSaveToLib ? '<button class="btn ghost sm" data-act="save" title="把这张卡存进角色卡库">存库</button>' : ''}
         ${onRemove ? '<button class="icon-btn danger" data-act="remove">×</button>' : ''}
       </div>
     `;
     el.querySelector('[data-act="edit"]').onclick = onEdit;
     el.querySelector('[data-act="random"]').onclick = onRandom;
+    if (onImport) el.querySelector('[data-act="import"]').onclick = onImport;
+    if (onSaveToLib) el.querySelector('[data-act="save"]').onclick = onSaveToLib;
     if (onRemove) el.querySelector('[data-act="remove"]').onclick = onRemove;
     return el;
   };
@@ -252,6 +277,15 @@ export async function openGameSetup({ onStart, state = null, api = null }) {
           });
           Object.assign(playerChar, fresh);
           renderChars();
+        },
+        // 玩家只能从「玩家角色卡」库里挑
+        onImport: async () => {
+          const picked = await pickCharFromLibrary('player', { title: '导入玩家角色卡' });
+          if (picked) { Object.assign(playerChar, picked); renderChars(); }
+        },
+        onSaveToLib: async () => {
+          await saveCharToLibrary('player', playerChar, { name: playerChar.name });
+          flashSaved('已存进玩家角色卡库');
         }
       }));
     }
@@ -269,6 +303,15 @@ export async function openGameSetup({ onStart, state = null, api = null }) {
           const fresh = randomCharacter({ name: t.name, isPlayer: false });
           Object.assign(t, fresh);
           renderChars();
+        },
+        // 队友从「AI 角色卡」库里挑
+        onImport: async () => {
+          const picked = await pickCharFromLibrary('ai', { title: `导入队友 ${i + 1} 的角色卡` });
+          if (picked) { Object.assign(t, picked); renderChars(); }
+        },
+        onSaveToLib: async () => {
+          await saveCharToLibrary('ai', t, { name: t.name });
+          flashSaved(`已存进 AI 角色卡库：${t.name}`);
         },
         onRemove: teammates.length > 1
           ? () => {
@@ -289,6 +332,81 @@ export async function openGameSetup({ onStart, state = null, api = null }) {
       charBox.appendChild(tip);
     }
   };
+
+  // -------------------------------------------------------------------------
+  // 调查员伙伴
+  // -------------------------------------------------------------------------
+  /** 短暂提示，用于「存库」这类没有可见结果的操作 */
+  let flashTimer = null;
+  const flashSaved = (msg) => {
+    const box = backdrop.querySelector('#companionFlash') || (() => {
+      const el = document.createElement('div');
+      el.id = 'companionFlash';
+      el.className = 'setup-flash';
+      backdrop.querySelector('#companionSection')?.appendChild(el);
+      return el;
+    })();
+    box.textContent = msg;
+    box.classList.add('on');
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => box.classList.remove('on'), 2000);
+  };
+
+  const renderCompanions = () => {
+    const box = backdrop.querySelector('#companionList');
+    if (!box) return;
+    box.innerHTML = '';
+
+    if (!companions.length) {
+      const hint = document.createElement('div');
+      hint.className = 'empty-hint';
+      hint.textContent = '还没有添加伙伴。点下面「添加伙伴」从角色卡库挑人。';
+      box.appendChild(hint);
+      return;
+    }
+
+    companions.forEach((c, i) => {
+      const d = c.derived || {};
+      const el = document.createElement('div');
+      el.className = 'companion-row';
+      el.innerHTML = `
+        <div class="cp-main">
+          <span class="cp-name">${escapeHtml(c.name)}</span>
+          <span class="cp-meta">${escapeHtml(c.occupation || '无职业')} · HP ${d.HP ?? '?'} SAN ${d.SAN ?? '?'}</span>
+        </div>
+        <div class="cp-actions">
+          <button class="btn ghost sm" data-act="view">查看</button>
+          <button class="icon-btn danger" data-act="remove" title="移除">×</button>
+        </div>
+      `;
+      // 伙伴只读查看：这一局里他们不在队中，改卡会让人困惑
+      el.querySelector('[data-act="view"]').onclick = () => openCharEditor(c, {
+        title: `伙伴：${c.name}`,
+        state, api,
+        onSaved: () => renderCompanions()
+      });
+      el.querySelector('[data-act="remove"]').onclick = () => {
+        companions.splice(i, 1);
+        renderCompanions();
+      };
+      box.appendChild(el);
+    });
+  };
+
+  const addCompanionBtn = backdrop.querySelector('#btnAddCompanion');
+  if (addCompanionBtn) {
+    addCompanionBtn.onclick = async () => {
+      const picked = await pickCharFromLibrary('ai', { title: '选择调查员伙伴' });
+      if (!picked) return;
+      // 同一张卡别重复添加
+      if (companions.some((c) => c.name === picked.name && c.occupation === picked.occupation)) {
+        flashSaved('这张卡已经在伙伴列表里了');
+        return;
+      }
+      companions.push(picked);
+      renderCompanions();
+    };
+  }
 
   /** 队友数变化时，补齐或裁掉角色卡 */
   const syncTeammates = (count) => {
@@ -322,6 +440,7 @@ export async function openGameSetup({ onStart, state = null, api = null }) {
   renderModules();
   renderBrief();
   renderChars();
+  renderCompanions();
   refreshHints();
 
   backdrop.querySelectorAll('.mode-opt').forEach((b) => {
@@ -354,7 +473,9 @@ export async function openGameSetup({ onStart, state = null, api = null }) {
       teammateCount: count,
       // 把车好的卡交给开局流程；没有的让 session 自己补
       playerChar: mode === 'player' ? playerChar : null,
-      teammates: teammates.slice(0, count)
+      teammates: teammates.slice(0, count),
+      // 调查员伙伴：不随队，需要时由 KP 判断能否赶来支援
+      companions: companions.slice()
     });
   };
 }

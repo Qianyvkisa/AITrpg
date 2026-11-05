@@ -62,12 +62,16 @@ export class GameEngine {
     const s = this.state;
     const playerChar = s.playerChar ? characterToPrompt(s.playerChar, { full: true }) : '';
     const teammates = (s.teammates || []).map((t) => characterToPrompt(t, { full: true }));
+    // 伙伴不在队里，只给精简档案：KP 需要知道「外面还有谁能赶来」，
+    // 但不需要他们的完整技能表占满上下文
+    const companions = (s.companions || []).map((c) => characterToPrompt(c, { full: false }));
 
     const sys = keeperSystemPrompt({
       module: s.module?.raw || '',
       scenario: s.scenario,
       playerChar,
       teammates,
+      companions,
       tone: s.tone,
       mode: s.mode || 'player'
     });

@@ -18,6 +18,7 @@ import { stripXml, cleanWordFields, fingerprint, dedupeDocs, materialsToPromptTe
 import { extractJson, repairTruncatedJson, moduleFromUnderstanding, buildUnderstandPrompt } from '../electron/moduleAI.js';
 import { hasRunTurn, menuButtonVisibility } from '../src/ui/menu.js';
 import { buildSession, clampTeammateCount, createTeammate, MAX_TEAMMATES } from '../src/core/session.js';
+import { keeperSystemPrompt } from '../src/core/prompts.js';
 import { BUILTIN_MODULES, findBuiltinModule, openingFor } from '../src/core/builtinModules.js';
 import { moduleInfoFor, moduleRowMeta, extractFactsFromRaw, FREE_PLAY_INFO } from '../src/core/moduleInfo.js';
 import {
@@ -386,6 +387,80 @@ group('buildSession 开局配置', () => {
   const mod = BUILTIN_MODULES[0];
   const withMod = buildSession({ mode: 'player', teammateCount: 0, module: mod });
   eq(withMod.module?.id, mod.id, '模组被带上');
+});
+
+// ---- 调查员伙伴（后备援军） ----
+group('调查员伙伴', () => {
+  // 没传伙伴时应该是空数组，而不是 undefined——
+  // 下游（存档、提示词、engine）都直接 .map，undefined 会炸
+  const none = buildSession({ mode: 'player', teammateCount: 1 });
+  ok(Array.isArray(none.companions), '默认 companions 是数组');
+  eq(none.companions.length, 0, '默认没有伙伴');
+
+  // 传了伙伴就原样带上，并且是规范化过的角色卡
+  const raw = createCharacter({ name: '老周', isPlayer: false });
+  raw.occupation = '退伍军人';
+  const withCp = buildSession({
+    mode: 'player', teammateCount: 0, companions: [raw]
+  });
+  eq(withCp.companions.length, 1, '伙伴被带上');
+  eq(withCp.companions[0].name, '老周', '伙伴名字保留');
+  eq(withCp.companions[0].isPlayer, false, '伙伴不是玩家角色');
+  ok(withCp.companions[0].derived, '伙伴经过 normalizeCharacter，有 derived');
+
+  // 伙伴不占队友名额：3 个队友 + 2 个伙伴，两个数量互不影响
+  const mixed = buildSession({
+    mode: 'player', teammateCount: 3,
+    companions: [createCharacter({ name: 'A' }), createCharacter({ name: 'B' })]
+  });
+  eq(mixed.teammates.length, 3, '队友数不受伙伴影响');
+  eq(mixed.companions.length, 2, '伙伴数不受队友名额影响');
+});
+
+// ---- 伙伴注入 KP 提示词 ----
+group('伙伴进入 KP 提示词', () => {
+  const base = { scenario: { scene: '', events: [], clues: [], secrets: [], notes: '' }, tone: '经典恐怖' };
+
+  const without = keeperSystemPrompt({ ...base, mode: 'player' });
+  ok(!without.includes('调查员伙伴'), '没有伙伴时不出现伙伴段落');
+
+  const withCp = keeperSystemPrompt({
+    ...base, mode: 'player',
+    companions: ['调查员：老周\n职业：退伍军人']
+  });
+  ok(withCp.includes('调查员伙伴'), '有伙伴时出现伙伴段落');
+  ok(withCp.includes('老周'), '伙伴档案被写进提示词');
+  ok(withCp.includes('后备援军'), '标明是后备援军');
+  // 关键：必须把「能不能来由 KP 判断」写清楚，否则 AI 会随便让援军空降
+  ok(withCp.includes('什么时候可以赶来支援'), '包含可支援条件');
+  ok(withCp.includes('什么时候不该来'), '包含不可支援条件');
+  ok(withCp.includes('不要为了让场面热闹'), '明确禁止随意登场');
+});
+
+// ---- 伙伴进存档快照 ----
+group('伙伴存档往返', () => {
+  const st = createInitialState();
+  const cp = createCharacter({ name: '援军老李' });
+  st.companions = [cp];
+  st.playerChar = createCharacter({ name: '主角' });
+  st.teammates = [createCharacter({ name: '队友' })];
+
+  const snap = buildSnapshot(st);
+  eq(snap.state.companions.length, 1, '快照里带伙伴');
+  eq(snap.state.companions[0].name, '援军老李', '伙伴内容正确');
+
+  // 读回来
+  const fresh = createInitialState();
+  applySnapshot(fresh, snap);
+  eq(fresh.companions.length, 1, '读档后伙伴还在');
+  eq(fresh.companions[0].name, '援军老李', '读档后伙伴内容一致');
+
+  // 老存档没有 companions 字段，不能炸，要兜底成空数组
+  const oldSnap = { state: { playerChar: null, teammates: [], messages: [] } };
+  const old = createInitialState();
+  applySnapshot(old, oldSnap);
+  ok(Array.isArray(old.companions), '老存档兜底成数组');
+  eq(old.companions.length, 0, '老存档伙伴为空');
 });
 
 group('createTeammate 队友模板', () => {

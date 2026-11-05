@@ -1454,3 +1454,113 @@ select:disabled {
 .roll-btn:disabled {
   opacity: .5;
 }
+
+/* ===========================================================================
+   角色卡库（charlib）
+   玩家 / AI 两个库用 tab 切换，视觉上分开，避免找卡时混在一起
+   =========================================================================== */
+.charlib-modal { width: min(760px, 92vw); }
+
+.charlib-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+.charlib-tab {
+  display: flex; align-items: center; gap: 6px;
+  background: transparent; border: 1px solid var(--border);
+  border-radius: 3px; color: var(--ink-dim);
+  font-family: inherit; font-size: 11px; letter-spacing: 1px;
+  padding: 7px 12px; cursor: pointer;
+  transition: border-color .12s, color .12s, background .12s;
+}
+.charlib-tab:hover { border-color: var(--accent-soft); color: var(--ink); }
+.charlib-tab.on {
+  border-color: var(--accent-soft); color: var(--accent);
+  background: rgba(184,137,74,.1);
+}
+/* 数量角标：一眼看出哪个库里有卡 */
+.charlib-tab .ct-count {
+  font-family: var(--font-mono); font-size: 10px;
+  background: rgba(255,255,255,.06); border-radius: 8px;
+  padding: 1px 6px; color: var(--ink-faint);
+}
+.charlib-tab.on .ct-count { color: var(--accent); background: rgba(184,137,74,.16); }
+
+.charlib-desc {
+  font-size: 11px; color: var(--ink-faint);
+  margin-bottom: 12px; line-height: 1.7;
+}
+
+.charlib-list { display: flex; flex-direction: column; gap: 8px; }
+
+.charlib-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--bg-raised); border: 1px solid var(--border-soft);
+  border-radius: 3px; padding: 10px 12px;
+}
+.charlib-card .clc-main { min-width: 0; flex: 1 1 auto; }
+.charlib-card .clc-top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.charlib-card .clc-name { font-size: 13.5px; color: #d8d3c8; }
+.charlib-card .clc-occ {
+  font-size: 10px; color: var(--ink-faint);
+  border: 1px solid var(--border-soft); border-radius: 2px; padding: 1px 5px;
+}
+.charlib-card .clc-meta {
+  font-size: 10px; color: var(--ink-dim);
+  font-family: var(--font-mono); margin-top: 4px;
+}
+.charlib-card .clc-date { font-size: 9.5px; color: var(--ink-faint); margin-top: 3px; }
+.charlib-card .clc-actions { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+
+/* 选卡弹窗 */
+.pick-modal { width: min(560px, 92vw); }
+.pick-list { display: flex; flex-direction: column; gap: 6px; }
+.pick-row {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  background: var(--bg-raised); border: 1px solid var(--border-soft);
+  border-radius: 3px; padding: 9px 12px; cursor: pointer;
+  font-family: inherit; text-align: left; width: 100%;
+  transition: border-color .12s, background .12s;
+}
+.pick-row:hover { border-color: var(--accent-soft); background: rgba(184,137,74,.08); }
+.pick-row .pr-name { font-size: 13px; color: #d0ccc2; }
+.pick-row .pr-meta { font-size: 10px; color: var(--ink-faint); font-family: var(--font-mono); }
+
+/* ===========================================================================
+   调查员伙伴（设定界面）
+   =========================================================================== */
+.companion-list { display: flex; flex-direction: column; gap: 6px; }
+.companion-actions { margin-top: 8px; }
+.companion-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--bg-raised); border: 1px solid var(--border-soft);
+  border-radius: 3px; padding: 8px 11px;
+}
+.companion-row .cp-main { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.companion-row .cp-name { font-size: 12.5px; color: #d0ccc2; }
+.companion-row .cp-meta { font-size: 10px; color: var(--ink-faint); font-family: var(--font-mono); }
+.companion-row .cp-actions { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+
+/* 存库之类没有可见结果的操作，用一条会自己消失的提示 */
+.setup-flash {
+  font-size: 11px; color: var(--accent);
+  margin-top: 8px; opacity: 0; transition: opacity .2s;
+}
+.setup-flash.on { opacity: 1; }
+
+/* ===========================================================================
+   从存档提取角色卡
+   =========================================================================== */
+.extract-modal { width: min(560px, 92vw); }
+.extract-list { display: flex; flex-direction: column; gap: 6px; }
+.extract-row {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-raised); border: 1px solid var(--border-soft);
+  border-radius: 3px; padding: 9px 12px; cursor: pointer;
+}
+.extract-row:hover { border-color: var(--accent-soft); }
+.extract-row .ex-main { display: flex; flex-direction: column; gap: 3px; flex: 1 1 auto; min-width: 0; }
+.extract-row .ex-name { font-size: 12.5px; color: #d0ccc2; }
+.extract-row .ex-meta { font-size: 10px; color: var(--ink-faint); font-family: var(--font-mono); }
+.extract-row .ex-kind {
+  font-size: 9.5px; color: var(--ink-faint);
+  border: 1px solid var(--border-soft); border-radius: 2px; padding: 1px 5px;
+  flex: 0 0 auto;
+}

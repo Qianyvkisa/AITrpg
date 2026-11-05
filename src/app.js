@@ -22,7 +22,7 @@ import {
   applyCleanText,
   replaceMessage
 } from './ui/messages.js';
-import { openSettings, openModules, openCharEditor, openTeammateCreator, openSaves, openGameSetup } from './modals/index.js';
+import { openSettings, openModules, openCharEditor, openTeammateCreator, openSaves, openGameSetup, openCharLibrary } from './modals/index.js';
 import { hasRunTurn, menuButtonVisibility } from './ui/menu.js';
 import { buildSession } from './core/session.js';
 import { openingFor } from './core/builtinModules.js';
@@ -314,6 +314,7 @@ function bindUI() {
   $('#menuContinue').onclick = continueGame;
   $('#menuAbandon').onclick = abandonGame;
   $('#menuSaves').onclick = openSaveDialog;
+  $('#menuChars').onclick = () => openCharLibrary({ state, api: window.api });
   $('#menuModules').onclick = () => openModules(state, () => renderAll(state, panelHandlers));
   $('#menuSettings').onclick = () =>
     openSettings(state, () => {
@@ -417,6 +418,7 @@ function beginGame(cfg) {
   state.mode = session.mode;
   state.module = session.module;
   state.teammates = session.teammates;
+  state.companions = session.companions || [];
   state.playerChar = session.playerChar;
   state.turns = 0;
 

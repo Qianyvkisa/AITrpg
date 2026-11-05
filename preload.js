@@ -23,6 +23,13 @@ contextBridge.exposeInMainWorld('api', {
   readSave: (slot) => ipcRenderer.invoke('save:read', slot),
   deleteSave: (slot) => ipcRenderer.invoke('save:delete', slot),
 
+  // 角色卡库（kind: 'player' | 'ai'，两边分开存）
+  listChars: (kind) => ipcRenderer.invoke('char:list', kind),
+  saveChar: (kind, char, opts = {}) =>
+    ipcRenderer.invoke('char:save', { kind, char, id: opts.id ?? null, name: opts.name ?? null }),
+  deleteChar: (kind, id) => ipcRenderer.invoke('char:delete', { kind, id }),
+  renameChar: (kind, id, name) => ipcRenderer.invoke('char:rename', { kind, id, name }),
+
   // 模组
   importModule: () => ipcRenderer.invoke('module:import'),
   importModuleFolder: (payload) => ipcRenderer.invoke('module:importFolder', payload),

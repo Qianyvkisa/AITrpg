@@ -48,13 +48,14 @@ if (!gotSingleInstanceLock) {
 const { registerWindowLifecycle, getWindow } = require('./electron/window');
 const { registerConfigIpc } = require('./electron/config');
 const { registerLlmIpc } = require('./electron/llm');
-const { registerSaveIpc, registerModuleIpc, registerStoreIpc } = require('./electron/ipc-files');
+const { registerSaveIpc, registerModuleIpc, registerStoreIpc, registerCharIpc } = require('./electron/ipc-files');
 
 registerConfigIpc();
 registerLlmIpc(getWindow);
 registerSaveIpc();
 registerModuleIpc(getWindow);
 registerStoreIpc();
+registerCharIpc();
 
 crashlog.log('ipc handlers registered');
 

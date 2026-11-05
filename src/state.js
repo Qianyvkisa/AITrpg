@@ -8,6 +8,8 @@ export function createInitialState() {
   return {
     playerChar: null,
     teammates: [],
+    // 调查员伙伴：不在队伍里，剧情需要时由 KP 判断能否赶来支援
+    companions: [],
     messages: [],
     scenario: {
       scene: '',

@@ -198,10 +198,83 @@ function registerModuleIpc(getWindow) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// 角色卡库
+//
+// 玩家角色卡和 AI 队友角色卡分开存两个文件，因为它们的用途不同：
+//   characters-player.json  —— 玩家自己的调查员，随时可以拿来开局
+//   characters-ai.json      —— AI 队友，供开局时挑人、以及模组里当支援伙伴
+//
+// 每张卡是一个完整的角色卡对象，外面套一层 meta（id / 保存时间 / 来源）。
+// ---------------------------------------------------------------------------
+const CHAR_KINDS = {
+  player: 'characters-player.json',
+  ai: 'characters-ai.json'
+};
+
+function charFile(kind) {
+  return CHAR_KINDS[kind] || CHAR_KINDS.player;
+}
+
+function listChars(kind) {
+  const list = readJSON(charFile(kind), []);
+  return Array.isArray(list) ? list : [];
+}
+
+function registerCharIpc() {
+  /** 列出某个库里所有角色卡（按保存时间倒序） */
+  ipcMain.handle('char:list', (_e, kind) => {
+    return listChars(kind)
+      .slice()
+      .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+  });
+
+  /**
+   * 存一张角色卡。
+   * 传 id 表示覆盖已有卡，不传则新建。
+   * @returns {{ok: true, id: string}}
+   */
+  ipcMain.handle('char:save', (_e, { kind, char, id = null, name = null }) => {
+    if (!char || typeof char !== 'object') return { ok: false, error: '角色卡内容为空' };
+
+    const file = charFile(kind);
+    const list = listChars(kind);
+
+    const entry = {
+      id: id || 'char-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      savedAt: Date.now(),
+      name: name || char.name || '未命名调查员',
+      char
+    };
+
+    const idx = id ? list.findIndex((c) => c.id === id) : -1;
+    if (idx >= 0) list[idx] = entry;
+    else list.push(entry);
+
+    writeJSON(file, list);
+    return { ok: true, id: entry.id };
+  });
+
+  ipcMain.handle('char:delete', (_e, { kind, id }) => {
+    const file = charFile(kind);
+    writeJSON(file, listChars(kind).filter((c) => c.id !== id));
+    return { ok: true };
+  });
+
+  /** 改名：只动库里的显示名，不动角色卡本身 */
+  ipcMain.handle('char:rename', (_e, { kind, id, name }) => {
+    const list = listChars(kind);
+    const hit = list.find((c) => c.id === id);
+    if (hit) hit.name = String(name || '').trim() || hit.name;
+    writeJSON(charFile(kind), list);
+    return { ok: true };
+  });
+}
+
 // 通用键值存储（世界观笔记等）
 function registerStoreIpc() {
   ipcMain.handle('store:get', (_e, key) => readJSON(`${key}.json`, null));
   ipcMain.handle('store:set', (_e, { key, value }) => writeJSON(`${key}.json`, value));
 }
 
-module.exports = { registerSaveIpc, registerModuleIpc, registerStoreIpc };
+module.exports = { registerSaveIpc, registerModuleIpc, registerStoreIpc, registerCharIpc };

@@ -8,3 +8,4 @@ export { openCharEditor } from './charEditor.js';
 export { openTeammateCreator } from './teammateCreator.js';
 export { openSaves } from './saves.js';
 export { openGameSetup } from './gameSetup.js';
+export { openCharLibrary, saveCharToLibrary } from './charLibrary.js';

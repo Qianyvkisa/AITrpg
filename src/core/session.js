@@ -129,7 +129,7 @@ export function createTeammate(index = 0, rand = Math.random) {
  */
 export function buildSession({
   mode = 'player', module = null, teammateCount = 1, rand = Math.random,
-  playerChar = null, teammates: preset = null
+  playerChar = null, teammates: preset = null, companions: presetCompanions = null
 } = {}) {
   const count = clampTeammateCount(teammateCount);
 
@@ -143,6 +143,12 @@ export function buildSession({
     teammates.push(createTeammate(i, rand));
   }
 
+  // 调查员伙伴：不在队伍里，只是「随时可能赶来的援军」。
+  // 不占队友名额，所以这里不做数量截断，由设定界面自己控制。
+  const companions = Array.isArray(presetCompanions)
+    ? presetCompanions.map((c) => normalizeCharacter(c))
+    : [];
+
   const spectator = mode === 'spectator';
 
   return {
@@ -150,6 +156,7 @@ export function buildSession({
     module: module || null,
     teammateCount: count,
     teammates,
+    companions,
     // 旁观模式没有玩家角色；玩家模式优先用车好的卡
     playerChar: spectator
       ? null
