@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>UI 布局验证</title>
+  <link rel="stylesheet" href="../../src/styles.css">
+  <style>
+    body { background: #0a0b0f; }
+    /* 预览页不加载字体文件，用系统衬线兜底，避免 404 干扰判断 */
+    :root { --font-serif: "Songti SC", "SimSun", serif; }
+  </style>
+</head>
+<body>
+  <div id="modalRoot"></div>
+  <script type="module" src="./preview.js"></script>
+</body>
+</html>

@@ -1,0 +1,265 @@
+// ---------------------------------------------------------------------------
+// 角色卡编辑器渲染冒烟测试
+// 用最小 DOM 桩执行 openCharEditor，确认各标签页能渲染、collect 能收集
+// ---------------------------------------------------------------------------
+
+// ---- 极简 DOM 桩 ----
+class El {
+  constructor(tag = 'div') {
+    this.tagName = tag.toUpperCase();
+    this.children = [];
+    this.parentNode = null;
+    this.className = '';
+    this._innerHTML = '';
+    this.value = '';
+    this.dataset = {};
+    this.style = {};
+    this._handlers = {};
+    this.classList = {
+      _set: new Set(),
+      add: (c) => this.classList._set.add(c),
+      remove: (c) => this.classList._set.delete(c),
+      toggle: (c, on) => { if (on) this.classList._set.add(c); else this.classList._set.delete(c); },
+      contains: (c) => this.classList._set.has(c)
+    };
+  }
+  // 关键：设置 innerHTML 时把里面的节点「解析」成可查询的桩节点
+  get innerHTML() { return this._innerHTML; }
+  set innerHTML(v) {
+    this._innerHTML = v;
+    this.children = [];
+    if (v) parseInto(v, this);
+  }
+  setAttribute(k, v) { this[k] = v; }
+  getAttribute(k) { return this[k]; }
+  appendChild(c) { c.parentNode = this; this.children.push(c); return c; }
+  remove() { if (this.parentNode) this.parentNode.children = this.parentNode.children.filter((x) => x !== this); }
+  addEventListener(t, fn) { this._handlers[t] = fn; }
+  get onclick() { return this._handlers.click; }
+  set onclick(fn) { this._handlers.click = fn; }
+  querySelectorAll(sel) { return queryAll(this, sel); }
+  querySelector(sel) { return queryAll(this, sel)[0] || null; }
+  get textContent() { return this._text || ''; }
+  set textContent(v) { this._text = v; }
+  get disabled() { return this._disabled || false; }
+  set disabled(v) { this._disabled = v; }
+}
+
+/** 极简选择器：支持 #id、.class、[attr="v"]、[attr] 及其组合，只按已注册的节点匹配 */
+function queryAll(root, sel) {
+  const out = [];
+  const parts = sel.trim().split(/\s+/);
+  // 不支持后代组合，只处理单段或逗号
+  const simple = parts[parts.length - 1];
+  const candidates = [];
+  const walk = (n) => { for (const c of n.children) { candidates.push(c); walk(c); } };
+  walk(root);
+
+  for (const node of candidates) {
+    if (matchSimple(node, simple)) out.push(node);
+  }
+  return out;
+}
+
+function matchSimple(node, sel) {
+  // 处理 #id
+  const idM = sel.match(/#([\w-]+)/);
+  if (idM && node.id !== idM[1]) return false;
+  // 处理 .class
+  const clsM = sel.match(/\.([\w-]+)/);
+  if (clsM && !node.classList.contains(clsM[1]) && !node.className.split(/\s+/).includes(clsM[1])) return false;
+  // 处理 [attr="value"] 或 [attr]
+  const attrM = sel.match(/\[([\w-]+)(?:=["']?([^\]"']*)["']?)?\]/g) || [];
+  for (const am of attrM) {
+    const m = am.match(/\[([\w-]+)(?:=["']?([^\]"']*)["']?)?\]/);
+    const name = m[1];
+    const val = m[2];
+    const actual = name.startsWith('data-') ? node.dataset[name.slice(5)] : node[name];
+    if (val === undefined) { if (actual === undefined) return false; }
+    else if (String(actual) !== val) return false;
+  }
+  // 纯标签名
+  if (!idM && !clsM && attrM.length === 0 && sel) {
+    if (!/^[\w-]+$/.test(sel)) return true;
+    if (node.tagName !== sel.toUpperCase()) return false;
+  }
+  return true;
+}
+
+/** 把 innerHTML 里的 id/class 元素「注册」成可查询节点（粗粒度模拟） */
+function parseInto(html, container) {
+  // 提取所有带 id 的元素，建造成桩节点挂到 container 下
+  const idRe = /<(\w+)[^>]*\bid="([\w-]+)"[^>]*>/g;
+  let m;
+  while ((m = idRe.exec(html))) {
+    const el = new El(m[1]);
+    el.id = m[2];
+    const tagStr = m[0];
+    const cls = tagStr.match(/class="([^"]*)"/);
+    if (cls) { el.className = cls[1]; cls[1].split(/\s+/).forEach((c) => el.classList.add(c)); }
+    // data-* 属性
+    const dataRe = /data-([\w-]+)="([^"]*)"/g;
+    let dm;
+    while ((dm = dataRe.exec(tagStr))) el.dataset[dm[1]] = dm[2];
+    const typeM = tagStr.match(/type="([^"]*)"/);
+    if (typeM) el.type = typeM[1];
+    const valM = tagStr.match(/value="([^"]*)"/);
+    if (valM) el.value = valM[1];
+    container.appendChild(el);
+  }
+  // 带 data-attr / data-skill 等属性的 input 也要能找到
+  const dataOnlyRe = /<(\w+)[^>]*\b(data-(?:attr|skill|custom|bg|w|e|s|levels|hint|wi|ei|si|tab|mode|count|act))="([^"]*)"[^>]*>/g;
+  while ((m = dataOnlyRe.exec(html))) {
+    const el = new El(m[1]);
+    el.dataset[m[2].slice(5)] = m[3];
+    const tagStr = m[0];
+    const valM = tagStr.match(/value="([^"]*)"/);
+    if (valM) el.value = valM[1];
+    const typeM = tagStr.match(/type="([^"]*)"/);
+    if (typeM) el.type = typeM[1];
+    const clsM = tagStr.match(/class="([^"]*)"/);
+    if (clsM) { el.className = clsM[1]; clsM[1].split(/\s+/).forEach((c) => el.classList.add(c)); }
+    container.appendChild(el);
+  }
+  return container;
+}
+
+// ---- 全局环境 ----
+const modalRoot = new El();
+modalRoot.id = 'modalRoot';
+globalThis.document = {
+  querySelector: (sel) => (sel === '#modalRoot' ? modalRoot : null),
+  createElement: (t) => new El(t),
+  addEventListener: () => {}
+};
+globalThis.window = { api: {}, addEventListener: () => {} };
+globalThis.alert = (m) => { globalThis.__alert = m; };
+globalThis.confirm = () => true;
+globalThis.prompt = () => null;
+
+// ---- 开始测试 ----
+let passed = 0, failed = 0;
+const failures = [];
+function ok(c, n) { if (c) passed++; else { failed++; failures.push(n); console.log('  FAIL: ' + n); } }
+
+const { createCharacter } = await import('../src/core/character.js');
+const { openCharEditor } = await import('../src/modals/charEditor.js');
+
+const ch = createCharacter({ name: '测试调查员', isPlayer: true });
+ch.occupation = '记者';
+ch.background.traits = '好奇心重';
+ch.inventory = ['笔记本', '钢笔'];
+ch.weapons = [{ name: '左轮', skill: '射击：手枪', damage: '1d10', range: '15码' }];
+
+console.log('== 打开编辑器 ==');
+openCharEditor(ch, { title: '测试角色卡', allowAIGen: false });
+
+ok(modalRoot.children.length === 1, '弹窗已挂载');
+const backdrop = modalRoot.children[0];
+ok(backdrop.className.includes('modal-backdrop'), '遮罩层');
+
+// 弹窗内容已渲染：桩只登记带 id / data-* 的节点，用这些关键节点验证
+ok(backdrop.querySelector('#ceBody'), '正文容器已创建');
+ok(backdrop.querySelector('#btnSaveChar'), '保存按钮已创建');
+
+// 标签页
+const tabs = backdrop.querySelectorAll('.ce-tab');
+ok(tabs.length === 6, '六个标签页');
+
+const body = backdrop.querySelector('#ceBody');
+ok(body, '正文容器存在');
+
+// 基本信息页应已渲染
+const nameInput = backdrop.querySelector('#fName');
+ok(nameInput, '基本信息页已渲染（找到姓名输入框）');
+
+// 切换到属性页
+const attrTab = tabs.find((t) => t.dataset.tab === 'attrs');
+ok(attrTab, '找到属性标签');
+attrTab.onclick();
+ok(backdrop.querySelector('[data-attr="STR"]'), '属性页渲染出 STR 输入框');
+
+// 切到技能页
+const skillTab = tabs.find((t) => t.dataset.tab === 'skills');
+skillTab.onclick();
+ok(backdrop.querySelector('[data-skill="侦查"]'), '技能页渲染出侦查输入框');
+
+// 切到背景页
+const bgTab = tabs.find((t) => t.dataset.tab === 'bg');
+bgTab.onclick();
+ok(backdrop.querySelector('[data-bg="traits"]'), '背景页渲染出特质输入框');
+
+// 切到装备页
+const gearTab = tabs.find((t) => t.dataset.tab === 'gear');
+gearTab.onclick();
+ok(backdrop.querySelector('#fInventory'), '装备页渲染出随身物品框');
+
+console.log('\n== 设定界面角色卡列表 ==');
+globalThis.window.api = {
+  listModules: async () => [],
+  readSave: async () => null,
+  writeSave: async () => true
+};
+const { openGameSetup } = await import('../src/modals/gameSetup.js');
+
+// 清空弹窗
+modalRoot.children = [];
+
+const started = [];
+await openGameSetup({ onStart: (cfg) => started.push(cfg), state: { apiConfig: {}, teammates: [], tone: '经典恐怖' }, api: {} });
+
+ok(modalRoot.children.length === 1, '设定界面已打开');
+const setup = modalRoot.children[0];
+ok(setup.querySelector('#charCardList'), '角色卡列表容器存在');
+ok(setup.querySelector('#btnBeginGame'), '开始游戏按钮存在');
+
+// 默认应选中「自由创作」（moduleId = null），保证不再出现旧宅开场白
+const freeRow = setup.querySelectorAll('.setup-mod-row').find((r) => r.dataset.modId === '');
+ok(freeRow, '存在自由创作选项');
+ok(freeRow.className.includes('on'), '自由创作默认选中');
+
+// 角色卡行：默认 1 位玩家 + 1 位队友
+const charRows = setup.querySelectorAll('.char-row');
+ok(charRows.length >= 2, '玩家与队友各有一行角色卡');
+
+// ---- 模组简介面板 ----
+const brief = setup.querySelector('#setupBrief');
+ok(brief, '模组简介容器存在');
+
+// 默认（自由创作）应显示自由创作的简介
+ok(brief.innerHTML.includes('自由创作'), '默认显示自由创作的简介');
+ok(brief.innerHTML.includes('车卡建议') === false, '自由创作不显示车卡建议块');
+
+// 点内置模组，简介切到该模组
+const builtinRow = setup.querySelectorAll('.setup-mod-row').find((r) => r.dataset.modId === 'builtin-old-house');
+ok(builtinRow, '存在内置模组选项');
+builtinRow.onclick();
+ok(brief.innerHTML.includes('旧宅疑影'), '选中内置模组后简介显示标题');
+ok(brief.innerHTML.includes('1920'), '简介显示时代');
+ok(brief.innerHTML.includes('车卡建议'), '简介显示车卡建议');
+
+// 简介绝不能剧透：真相 / 怪物 / 结局 / NPC 秘密都不能出现
+const leakWords = ['黄衣之王', '回声', '封印', '真相', '终局', '阁楼', '玛莎', '汤姆', '火漆印'];
+for (const w of leakWords) {
+  ok(!brief.innerHTML.includes(w), `设定界面简介不剧透「${w}」`);
+}
+ok(!brief.innerHTML.includes('神话'), '设定界面简介不出现「神话」字样');
+
+// 切回自由创作，简介也要跟着回去
+const freeRow2 = setup.querySelectorAll('.setup-mod-row').find((r) => r.dataset.modId === '');
+freeRow2.onclick();
+ok(brief.innerHTML.includes('自由创作'), '切回自由创作时简介同步更新');
+
+// 点「开始游戏」，确认 cfg 带出角色卡
+setup.querySelector('#btnBeginGame').onclick();
+ok(started.length === 1, 'onStart 被调用');
+const cfg = started[0];
+ok(cfg.mode === 'player', '模式为 player');
+ok(cfg.module === null, '默认无模组（自由创作）');
+ok(cfg.playerChar && cfg.playerChar.name, 'cfg 带出玩家角色卡');
+ok(Array.isArray(cfg.teammates) && cfg.teammates.length >= 1, 'cfg 带出队友角色卡');
+
+console.log('\n' + '='.repeat(40));
+console.log(`通过 ${passed} 项，失败 ${failed} 项`);
+if (failed) { for (const f of failures) console.log(' - ' + f); process.exit(1); }
+console.log('全部通过');

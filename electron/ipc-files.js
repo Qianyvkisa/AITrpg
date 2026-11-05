@@ -1,0 +1,207 @@
+'use strict';
+
+// ---------------------------------------------------------------------------
+// 存档 / 模组 / 通用键值存储 的 IPC
+// ---------------------------------------------------------------------------
+const { ipcMain, dialog } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const { readJSON, writeJSON, deleteFile, listFiles } = require('./storage');
+const { readFolder, readSingleFile, materialsToPromptText } = require('./materials');
+const { understandMaterials, moduleFromUnderstanding } = require('./moduleAI');
+const { loadConfig } = require('./config');
+
+const SAVE_PREFIX = 'save-';
+
+function registerSaveIpc() {
+  ipcMain.handle('save:list', () => {
+    const files = listFiles((f) => f.startsWith(SAVE_PREFIX) && f.endsWith('.json'));
+    return files
+      .map(({ name, path: p, stat }) => {
+        let meta = {};
+        try { meta = JSON.parse(fs.readFileSync(p, 'utf8')).meta ?? {}; } catch (_) { /* 坏档跳过 meta */ }
+        return { file: name, mtime: stat.mtimeMs, ...meta };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+  });
+
+  ipcMain.handle('save:write', (_e, { slot, state }) => {
+    const name = `${SAVE_PREFIX}${slot}.json`;
+    writeJSON(name, state);
+    return { ok: true, file: name };
+  });
+
+  ipcMain.handle('save:read', (_e, slot) => readJSON(`${SAVE_PREFIX}${slot}.json`, null));
+
+  ipcMain.handle('save:delete', (_e, slot) => {
+    deleteFile(`${SAVE_PREFIX}${slot}.json`);
+    return { ok: true };
+  });
+}
+
+function newModuleId() {
+  return 'mod-' + Date.now().toString(36);
+}
+
+function appendModule(mod) {
+  const list = readJSON('modules.json', []);
+  list.push(mod);
+  writeJSON('modules.json', list);
+  return mod;
+}
+
+function registerModuleIpc(getWindow) {
+  /**
+   * 导入单个文件（txt / md / json / docx / pdf / 图片）。
+   * 不再局限于纯文本。
+   */
+  ipcMain.handle('module:import', async () => {
+    const win = getWindow();
+    const r = await dialog.showOpenDialog(win, {
+      title: '导入模组文件',
+      filters: [
+        { name: '模组文档', extensions: ['txt', 'md', 'markdown', 'json', 'docx', 'pdf', 'html', 'htm'] },
+        { name: '图片素材', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] },
+        { name: '所有文件', extensions: ['*'] }
+      ],
+      properties: ['openFile']
+    });
+    if (r.canceled || !r.filePaths.length) return null;
+
+    const p = r.filePaths[0];
+    const parsed = await readSingleFile(p);
+
+    const text = materialsToPromptText(parsed);
+    if (!text.trim()) {
+      return {
+        error: parsed.skipped.map((s) => `${s.rel}：${s.reason}`).join('；') || '文件里没有可读内容'
+      };
+    }
+
+    return appendModule({
+      id: newModuleId(),
+      title: path.basename(p, path.extname(p)),
+      source: p,
+      importedAt: Date.now(),
+      raw: text,
+      materials: parsed.docs.map((d) => ({ rel: d.rel, kind: d.kind }))
+    });
+  });
+
+  /**
+   * 导入整个文件夹：递归读取 docx / pdf / 文本 / 图片。
+   * understand=false 时只把素材拼成文本，不调用 AI。
+   * understand=true  时交给 AI 整理成结构化模组。
+   */
+  ipcMain.handle('module:importFolder', async (_e, { folder, understand = true } = {}) => {
+    const win = getWindow();
+
+    let dir = folder;
+    if (!dir) {
+      const r = await dialog.showOpenDialog(win, {
+        title: '选择模组文件夹',
+        properties: ['openDirectory']
+      });
+      if (r.canceled || !r.filePaths.length) return null;
+      dir = r.filePaths[0];
+    }
+
+    let parsed;
+    try {
+      parsed = await readFolder(dir, {
+        onProgress: (rel) => {
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('module:progress', { folder: dir, rel });
+          }
+        }
+      });
+    } catch (e) {
+      return { error: `读取文件夹失败：${e.message}` };
+    }
+
+    const materialsText = materialsToPromptText(parsed);
+    if (!materialsText.trim()) {
+      return {
+        error:
+          '这个文件夹里没有可用的材料。支持 .docx / .pdf / .txt / .md / 图片，' +
+          `已跳过：${parsed.skipped.map((s) => `${s.rel}（${s.reason}）`).join('；') || '无'}`
+      };
+    }
+
+    const folderName = path.basename(dir);
+
+    // 不用 AI：直接把素材当作模组原文
+    if (!understand) {
+      return appendModule({
+        id: newModuleId(),
+        title: folderName,
+        source: dir,
+        importedAt: Date.now(),
+        raw: materialsText,
+        materials: {
+          docs: parsed.docs.map((d) => ({ rel: d.rel, kind: d.kind })),
+          images: parsed.images.map((i) => ({ rel: i.rel, mime: i.mime, bytes: i.bytes })),
+          skipped: parsed.skipped
+        }
+      });
+    }
+
+    // 用 AI 理解素材
+    const cfg = loadConfig();
+    const r = await understandMaterials(
+      { baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, model: cfg.model },
+      { folderName, materialsText, images: parsed.images }
+    );
+
+    if (!r.ok) {
+      return {
+        error: `AI 理解失败：${r.error}`,
+        hint: '可以改用「不经过 AI，直接存为模组」，素材原文仍会保留。',
+        materialsText
+      };
+    }
+
+    const raw = moduleFromUnderstanding(r.module, { folderName, materialsText });
+
+    return appendModule({
+      id: newModuleId(),
+      title: r.module.title || folderName,
+      source: dir,
+      importedAt: Date.now(),
+      raw,
+      understanding: r.module,
+      materials: {
+        docs: parsed.docs.map((d) => ({ rel: d.rel, kind: d.kind })),
+        images: parsed.images.map((i) => ({ rel: i.rel, mime: i.mime, bytes: i.bytes })),
+        skipped: parsed.skipped
+      },
+      visionUsed: !!r.visionUsed
+    });
+  });
+
+  ipcMain.handle('module:list', () => readJSON('modules.json', []));
+
+  ipcMain.handle('module:delete', (_e, id) => {
+    writeJSON('modules.json', readJSON('modules.json', []).filter((m) => m.id !== id));
+    return { ok: true };
+  });
+
+  // 直接从文本框粘贴模组
+  ipcMain.handle('module:addText', (_e, { title, raw }) =>
+    appendModule({
+      id: newModuleId(),
+      title: title || '未命名模组',
+      source: '(手动粘贴)',
+      importedAt: Date.now(),
+      raw
+    })
+  );
+}
+
+// 通用键值存储（世界观笔记等）
+function registerStoreIpc() {
+  ipcMain.handle('store:get', (_e, key) => readJSON(`${key}.json`, null));
+  ipcMain.handle('store:set', (_e, { key, value }) => writeJSON(`${key}.json`, value));
+}
+
+module.exports = { registerSaveIpc, registerModuleIpc, registerStoreIpc };

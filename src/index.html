@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'">
+  <title>COC 跑团 · AI 守密人</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- =========================================================================
+     主界面（程序开始界面）：开始 / 继续 / 存档 / 模组管理 / 设置
+     ========================================================================= -->
+<div id="startScreen" class="start-screen">
+  <div class="start-inner">
+    <div class="start-brand">
+      <span class="start-sigil">◈</span>
+      <h1>克苏鲁的呼唤</h1>
+      <span class="start-rule"></span>
+      <p class="start-sub">CALL OF CTHULHU · AI 守密人</p>
+    </div>
+
+    <nav class="start-menu">
+      <!-- 开始 与 继续 互斥：有进度时只显示「继续」，没有进度时才显示「开始」 -->
+      <button class="menu-btn primary" id="menuStart">
+        <span class="mb-label">开始</span>
+        <span class="mb-desc">开启一段新的调查</span>
+      </button>
+
+      <button class="menu-btn primary" id="menuContinue" hidden>
+        <span class="mb-label">继续</span>
+        <span class="mb-desc" id="menuContinueDesc"></span>
+      </button>
+
+      <!-- 放弃游戏：仅在存在进度时出现，清掉进度后回到「开始」状态 -->
+      <button class="menu-btn danger" id="menuAbandon" hidden>
+        <span class="mb-label">放弃游戏</span>
+        <span class="mb-desc">清除当前进度，重新开始</span>
+      </button>
+
+      <div class="menu-divider"></div>
+
+      <div class="menu-mini-row">
+        <button class="menu-mini" id="menuSaves">存档</button>
+        <button class="menu-mini" id="menuModules">模组管理</button>
+        <button class="menu-mini" id="menuSettings">设置</button>
+      </div>
+    </nav>
+
+    <div class="start-foot">
+      <span id="startModel" class="start-model">未配置模型</span>
+      <span class="start-sep">·</span>
+      <span class="start-note">COC 7th · 进度自动保存到本地</span>
+    </div>
+  </div>
+</div>
+
+<!-- =========================================================================
+     跑团界面
+     ========================================================================= -->
+<div id="app" hidden>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="sigil">◈</span>
+      <span class="title">克苏鲁的呼唤</span>
+      <span class="subtitle">AI 守密人</span>
+    </div>
+    <div class="top-actions">
+      <span id="connStatus" class="conn-status">未配置</span>
+      <button class="btn ghost" id="btnBackToMenu" title="回到主界面">‹ 主界面</button>
+      <button class="btn ghost" id="btnModules">模组</button>
+      <button class="btn ghost" id="btnSaves">存档</button>
+      <button class="btn ghost" id="btnSettings">设置</button>
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <aside class="panel left-panel">
+      <div class="panel-head">
+        <h2>调查员</h2>
+        <button class="icon-btn" id="btnNewChar" title="新建调查员">+</button>
+      </div>
+      <div id="charList" class="char-list"></div>
+
+      <div class="panel-head" style="margin-top:18px">
+        <h2>队友</h2>
+        <button class="icon-btn" id="btnAddTeammate" title="添加 AI 队友">+</button>
+      </div>
+      <div id="teammateList" class="teammate-list"></div>
+    </aside>
+
+    <section class="panel center-panel">
+      <div class="scene-bar">
+        <span class="scene-label">场景</span>
+        <span id="sceneName" class="scene-name">尚未开始</span>
+        <span id="turnCounter" class="turn-counter"></span>
+      </div>
+
+      <div id="messages" class="messages"></div>
+
+      <div class="composer">
+        <textarea id="input" placeholder="你要做什么？（Enter 发送，Shift+Enter 换行）" rows="2"></textarea>
+        <div class="composer-actions">
+          <button class="btn" id="btnSend">行动</button>
+          <button class="btn ghost" id="btnAuto" title="让队友 AI 主动说一句话">队友插话</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="panel right-panel">
+      <div class="panel-head"><h2>状态</h2></div>
+      <div id="statusPane" class="status-pane"></div>
+
+      <div class="panel-head" style="margin-top:18px"><h2>线索</h2></div>
+      <div id="clueList" class="clue-list"></div>
+
+      <div class="panel-head" style="margin-top:18px"><h2>日志</h2></div>
+      <div id="rollLog" class="roll-log"></div>
+    </aside>
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
