@@ -130,6 +130,46 @@ const call = (name, ...args) => handlers[name]({}, ...args);
   const sorted = await call('char:list', 'ai');
   eq(sorted[0].name, '后', '最近保存的排在前面');
 
+  // -------------------------------------------------------------------------
+  // 回归：开始界面「存库」连点会存出多份一模一样的卡
+  //
+  // 真实 bug：设定界面每次点「存库」都调 char:save 且不传库条目 id，
+  // 而原实现"不传 id 就新建"，于是同一张卡存了几份就有几条。
+  // 修复后按角色卡自带的 char.id 判定为同一张卡，覆盖而不是新增。
+  // -------------------------------------------------------------------------
+  fs.writeFileSync(path.join(tmpDir, 'data', 'characters-player.json'), '[]', 'utf8');
+  const sameChar = { id: 'pc-same001', name: '阿远', occupation: '记者' };
+
+  const r1 = await call('char:save', { kind: 'player', char: sameChar, id: null, name: '阿远' });
+  eq(r1.updated, false, '首次存库算新增');
+  const r2 = await call('char:save', { kind: 'player', char: sameChar, id: null, name: '阿远' });
+  eq(r2.updated, true, '再存同一张卡算更新');
+  const r3 = await call('char:save', { kind: 'player', char: sameChar, id: null, name: '阿远' });
+  eq(r3.updated, true, '第三次仍是更新');
+
+  const dedup = await call('char:list', 'player');
+  eq(dedup.length, 1, '同一张卡连存 3 次只保留 1 份');
+  eq(dedup[0].id, r1.id, '覆盖时沿用首次的库条目 id');
+  eq(dedup[0].char.id, 'pc-same001', '角色卡自身 id 保持不变');
+
+  // 内容更新也要写进去，不能只是"不新增"却保留旧内容
+  await call('char:save', {
+    kind: 'player',
+    char: { id: 'pc-same001', name: '阿远', occupation: '作家' },
+    id: null, name: '阿远'
+  });
+  eq((await call('char:list', 'player'))[0].char.occupation, '作家', '覆盖时内容确实更新');
+
+  // 不同 char.id 是不同的人，必须各自新建
+  await call('char:save', { kind: 'player', char: { id: 'pc-other002', name: '老周' }, id: null });
+  eq((await call('char:list', 'player')).length, 2, '不同 char.id 各自独立保存');
+
+  // 没有 char.id 的卡（老数据 / 手写对象）保持原语义：每次新建
+  await call('char:save', { kind: 'player', char: { name: '无 id 甲' }, id: null });
+  await call('char:save', { kind: 'player', char: { name: '无 id 甲' }, id: null });
+  const noId = (await call('char:list', 'player')).filter((e) => e.name === '无 id 甲');
+  eq(noId.length, 2, '无 char.id 时仍按新建处理，不会被误合并');
+
   // 收尾
   fs.rmSync(tmpDir, { recursive: true, force: true });
 

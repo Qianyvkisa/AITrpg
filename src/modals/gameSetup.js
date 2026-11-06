@@ -284,8 +284,10 @@ export async function openGameSetup({ onStart, state = null, api = null }) {
           if (picked) { Object.assign(playerChar, picked); renderChars(); }
         },
         onSaveToLib: async () => {
-          await saveCharToLibrary('player', playerChar, { name: playerChar.name });
-          flashSaved('已存进玩家角色卡库');
+          // 同一张卡重复点「存库」应当更新库里的那一份，而不是又加一张。
+          // 覆盖判定由主进程按角色卡自带的 char.id 完成（见 ipc-files.js char:save）。
+          const r = await saveCharToLibrary('player', playerChar, { name: playerChar.name });
+          flashSaved(r && r.updated ? '已更新库里的玩家角色卡' : '已存进玩家角色卡库');
         }
       }));
     }
@@ -310,8 +312,10 @@ export async function openGameSetup({ onStart, state = null, api = null }) {
           if (picked) { Object.assign(t, picked); renderChars(); }
         },
         onSaveToLib: async () => {
-          await saveCharToLibrary('ai', t, { name: t.name });
-          flashSaved(`已存进 AI 角色卡库：${t.name}`);
+          const r = await saveCharToLibrary('ai', t, { name: t.name });
+          flashSaved(r && r.updated
+            ? `已更新库里的队友角色卡：${t.name}`
+            : `已存进 AI 角色卡库：${t.name}`);
         },
         onRemove: teammates.length > 1
           ? () => {

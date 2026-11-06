@@ -232,8 +232,18 @@ function registerCharIpc() {
 
   /**
    * 存一张角色卡。
-   * 传 id 表示覆盖已有卡，不传则新建。
-   * @returns {{ok: true, id: string}}
+   *
+   * 覆盖规则（按优先级）：
+   *   1) 传了库条目 id —— 覆盖那条（编辑器里改已有卡走这条）
+   *   2) 没传 id，但角色卡自带 char.id 且库里已有同 char.id 的条目 —— 覆盖那条
+   *   3) 都没有 —— 新建
+   *
+   * 为什么要有第 2 条：
+   *   设定界面的「存库」按钮此前每点一次就多一张一模一样的卡，因为调用方
+   *   没传 id，而这里"不传 id 就新建"。角色卡本身带着稳定的 pc-xxx id，
+   *   它就是这张卡的身份，同一张卡反复存库应当覆盖同一份。
+   *
+   * @returns {{ok: true, id: string, updated: boolean}}
    */
   ipcMain.handle('char:save', (_e, { kind, char, id = null, name = null }) => {
     if (!char || typeof char !== 'object') return { ok: false, error: '角色卡内容为空' };
@@ -241,19 +251,29 @@ function registerCharIpc() {
     const file = charFile(kind);
     const list = listChars(kind);
 
+    // 1) 按库条目 id 找
+    let idx = id ? list.findIndex((c) => c.id === id) : -1;
+
+    // 2) 按角色卡自身 id 找（同 id 视为同一张卡）
+    if (idx < 0 && typeof char.id === 'string' && char.id) {
+      idx = list.findIndex((c) => c.char && c.char.id === char.id);
+    }
+
+    const updated = idx >= 0;
+
     const entry = {
-      id: id || 'char-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      // 覆盖时沿用原库条目 id，避免外部持有的引用失效
+      id: updated ? list[idx].id : (id || 'char-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)),
       savedAt: Date.now(),
       name: name || char.name || '未命名调查员',
       char
     };
 
-    const idx = id ? list.findIndex((c) => c.id === id) : -1;
-    if (idx >= 0) list[idx] = entry;
+    if (updated) list[idx] = entry;
     else list.push(entry);
 
     writeJSON(file, list);
-    return { ok: true, id: entry.id };
+    return { ok: true, id: entry.id, updated };
   });
 
   ipcMain.handle('char:delete', (_e, { kind, id }) => {
