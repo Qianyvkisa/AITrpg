@@ -4,7 +4,32 @@
 // 窗口创建与生命周期
 // ---------------------------------------------------------------------------
 const path = require('path');
+const fs = require('fs');
 const { app, BrowserWindow, shell } = require('electron');
+
+// ---------------------------------------------------------------------------
+// 启动时序记录（仅在设置 COCO_STARTUP_LOG 时启用）
+//
+// 为什么要它：启动画面"看不见"这个问题，从外部几乎无法诊断——
+// isVisible() 会骗人（返回 true 但窗口被盖住），Win32 窗口枚举在 PowerShell
+// 里又不可靠。只有让进程自己记录"窗口何时真的上了屏幕"，才能拿到真话。
+//
+// 用法：设环境变量 COCO_STARTUP_LOG=<文件路径> 再启动，
+// 结束后文件里就是完整时间线。正常使用不受任何影响。
+// ---------------------------------------------------------------------------
+const LOG_FILE = process.env.COCO_STARTUP_LOG || null;
+const T0 = Date.now();
+
+function slog(label) {
+  if (!LOG_FILE) return;
+  const line = `+${String(Date.now() - T0).padStart(5)}ms  ${label}\n`;
+  try {
+    fs.appendFileSync(LOG_FILE, line);
+  } catch { /* 日志失败不能影响启动 */ }
+  console.log('[startup] ' + line.trim());
+}
+
+slog('main.js 开始执行');
 
 let win = null;
 
@@ -130,10 +155,19 @@ function openRuleBookWindow() {
 //
 // 几个必须注意的点：
 //   1) splash 不能抢焦点，否则主窗口交接时焦点会跳一下
-//   2) 设最短显示时间，避免"闪一下就消失"——那比不显示更像卡顿
+//   2) 主窗口必须等 splash 退场后再显示，两个窗口不能重叠
 //   3) 主窗口加载失败时也要关掉 splash，不能让它永远转下去
+//
+// 关于第 2 点（踩过的坑）：
+//   最初的做法是"主窗口一准备好就 bringToFront，同时让 splash 至少留 700ms"。
+//   结果 splash 在 217ms 出现、主窗口 320ms 就盖上来了——
+//   splash 只有约 100ms 真正露在屏幕上，用户等于什么都没看见。
+//   isVisible() 却一直是 true，所以自检完全查不出来。
+//   根因是"最短显示时长"只管了什么时候关，没管什么时候被盖。
+//   现在改成：主窗口准备好之后，先等到 splash 该退场，再关 splash、再显示主窗口，
+//   两者在时间上完全错开。
 // ---------------------------------------------------------------------------
-const SPLASH_MIN_MS = 700;   // 最短显示时长（太短会像闪一下的故障）
+const SPLASH_MIN_MS = 900;   // splash 至少露这么久（含创建与渲染时间）
 const SPLASH_MAX_MS = 6000;  // 兜底：再慢也不能一直挂着
 
 let splash = null;
@@ -164,28 +198,37 @@ function showSplash() {
     });
 
     splash.loadFile(path.join(__dirname, '..', 'src', 'splash.html'));
-    // 已经显示了，但别抢焦点：showInactive 让它在不激活的情况下留在前台
-    splash.once('ready-to-show', () => {
-      if (splash && !splash.isDestroyed()) splash.showInactive();
-    });
-    splash.on('closed', () => { splash = null; });
+    slog('splash 窗口已创建并显示');
+    splash.once('ready-to-show', () => slog('splash ready-to-show'));
+    splash.webContents.once('did-finish-load', () => slog('splash 页面加载完成'));
+    splash.on('closed', () => { slog('splash 已关闭'); splash = null; });
   } catch {
     // 启动画面只是锦上添花，失败不能影响主流程
     splash = null;
   }
 }
 
-/** 关掉启动画面；不足最短时长就先等一会儿再关 */
-function hideSplash() {
-  if (!splash || splash.isDestroyed()) return;
-
-  const elapsed = Date.now() - splashStartAt;
-  const wait = Math.max(0, SPLASH_MIN_MS - elapsed);
-
-  setTimeout(() => {
-    if (splash && !splash.isDestroyed()) splash.close();
+/**
+ * 关闭启动画面。
+ * 返回一个 Promise，在 splash 真正关掉之后 resolve——
+ * 调用方要等它，才能保证主窗口出现时 splash 已经不在屏幕上了。
+ */
+function closeSplash() {
+  return new Promise((resolve) => {
+    if (!splash || splash.isDestroyed()) {
+      splash = null;
+      resolve();
+      return;
+    }
+    const s = splash;
     splash = null;
-  }, wait);
+    // 'closed' 事件才是真正关掉的时刻；只调 close() 不能保证已经消失
+    s.once('closed', () => { slog('closeSplash 完成'); resolve(); });
+    slog('closeSplash 请求关闭');
+    s.close();
+    // 极端情况下 'closed' 可能不触发（窗口已被系统回收），加个超时兜底
+    setTimeout(resolve, 300);
+  });
 }
 
 function createWindow() {
@@ -212,11 +255,24 @@ function createWindow() {
 
   // 三种触发各自兜底，任何一个先到就执行；都到也只执行一次
   let frontShown = false;
-  const showOnce = () => {
+  const showOnce = async () => {
     if (frontShown || !win || win.isDestroyed()) return;
     frontShown = true;
-    hideSplash();
+    slog('showOnce 触发（主窗口已准备好）');
+
+    // 等 splash 把最短时长露满，再交接；两者不重叠
+    const elapsed = Date.now() - splashStartAt;
+    const wait = Math.max(0, SPLASH_MIN_MS - elapsed);
+    if (wait > 0) {
+      slog(`等待 splash 补足最短时长 ${wait}ms`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+
+    await closeSplash();
+    if (!win || win.isDestroyed()) return;
+    slog('主窗口 bringToFront');
     bringToFront();
+    slog('主窗口已显示，交接完毕');
   };
 
   win.once('ready-to-show', showOnce);
@@ -224,8 +280,14 @@ function createWindow() {
   // 页面加载异常时 ready-to-show 不会触发，不能因此让窗口永远不出现
   setTimeout(showOnce, 1200);
   // 启动画面兜底关闭：即使上面都没触发，也不能让它一直转
-  setTimeout(() => { if (!frontShown) hideSplash(); }, SPLASH_MAX_MS);
+  setTimeout(async () => {
+    if (!frontShown) {
+      await closeSplash();
+      if (win && !win.isDestroyed()) bringToFront();
+    }
+  }, SPLASH_MAX_MS);
 
+  slog('开始加载 index.html');
   win.loadFile(path.join(__dirname, '..', 'src', 'index.html'));
   win.on('closed', () => { win = null; });
 

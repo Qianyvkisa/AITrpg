@@ -21,6 +21,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# 但不要把子进程写到 stderr 的内容当成致命错误：
+# 有些测试会故意触发错误路径（比如 charStore 写入坏 JSON 验证容错），
+# 那条 stderr 是预期输出，不代表测试失败。是否失败只看退出码。
+$PSNativeCommandUseErrorActionPreference = $false
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 
@@ -47,17 +51,40 @@ if ($SkipTest) {
   Write-Host '  跳过测试（-SkipTest）' -ForegroundColor Yellow
 } else {
   Step 1 '运行测试'
-  & $node tests\rules.test.mjs
-  if ($LASTEXITCODE -ne 0) { Die 'rules.test.mjs 未通过' }
-  & $node tests\unit.test.mjs
-  if ($LASTEXITCODE -ne 0) { Die 'unit.test.mjs 未通过' }
-  & $node tests\occupations.test.mjs
-  if ($LASTEXITCODE -ne 0) { Die 'occupations.test.mjs 未通过' }
-  & $node tests\charEditor.smoke.mjs
-  if ($LASTEXITCODE -ne 0) { Die 'charEditor.smoke.mjs 未通过' }
-  & $node tests\messages.dom.test.mjs
-  if ($LASTEXITCODE -ne 0) { Die 'messages.dom.test.mjs 未通过' }
-  Ok '全部测试通过'
+  # 自动发现 tests\ 下所有测试，而不是写死清单：
+  # 写死的清单漏过两次（ruleBook、charStore 都没跟上），
+  # 结果是"发布时测试全绿"其实根本没跑那几个。
+  $tests = Get-ChildItem (Join-Path $root 'tests') -Filter '*.test.mjs' |
+           Sort-Object Name
+  $smokes = Get-ChildItem (Join-Path $root 'tests') -Filter '*.smoke.mjs' |
+            Sort-Object Name
+  $all = @($tests) + @($smokes)
+
+  if (-not $all.Count) { Die 'tests 目录下没有找到任何测试' }
+
+  $failed = @()
+  foreach ($t in $all) {
+    Write-Host "  - $($t.Name)" -NoNewline
+    # 注意用 `> $null 2>&1` 而不是 `*> $null`：
+    # 后者在某些情况下会让 $LASTEXITCODE 取到重定向本身的结果，
+    # 把明明通过的测试误判成失败（我踩过一次，rules.test 单跑 138 项全过却被报失败）。
+    # 用 cmd 中转：PowerShell 5.1 在 $ErrorActionPreference=Stop 时，
+    # 子进程写 stderr 会被当成终止性错误直接中断脚本（即使退出码是 0）。
+    # 而 charStore 等测试会故意触发错误路径，stderr 是预期输出。
+    # 交给 cmd 跑，PowerShell 就只看到退出码。
+    & cmd /c "`"$node`" `"$($t.FullName)`" > nul 2>&1"
+    if ($LASTEXITCODE -ne 0) {
+      $failed += $t.Name
+      Write-Host '  失败' -ForegroundColor Red
+      # 失败时重跑一次并把输出放出来，否则看不到为什么失败
+      & $node $t.FullName
+    } else {
+      Write-Host '  OK' -ForegroundColor Green
+    }
+  }
+
+  if ($failed.Count) { Die ("测试未通过：" + ($failed -join '、')) }
+  Ok "全部测试通过（$($all.Count) 个文件）"
 }
 
 # ---- 2. 打包 exe -----------------------------------------------------------
