@@ -1,11 +1,11 @@
 {
   "name": "coc-keeper",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "COC 7th Edition AI Keeper - AI 同时担任守密人与队友调查员",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node tests/rules.test.mjs && node tests/unit.test.mjs && node tests/occupations.test.mjs && node tests/charStore.test.mjs && node tests/charEditor.smoke.mjs && node tests/gameSetup.smoke.mjs && node tests/messages.dom.test.mjs && node tests/ruleBook.test.mjs",
+    "test": "node tests/rules.test.mjs && node tests/unit.test.mjs && node tests/occupations.test.mjs && node tests/charStore.test.mjs && node tests/charGen.points.test.mjs && node tests/charEditor.smoke.mjs && node tests/gameSetup.smoke.mjs && node tests/messages.dom.test.mjs && node tests/ruleBook.test.mjs",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win portable && node tools/move-artifact.mjs"
   },

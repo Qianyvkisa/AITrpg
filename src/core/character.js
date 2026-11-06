@@ -189,6 +189,13 @@ export function createCharacter({ name = '调查员', isPlayer = false } = {}) {
     occupationNo: 0,       // 职业序号（对应 Excel 的 M5）
     attrs,
     skills,
+    /**
+     * 闪避/母语等「初始值由属性决定」的技能的初始值快照。
+     * 用于区分属性带来的初始值和玩家/AI 加的点，见 refreshDerived。
+     */
+    skillsBase: Object.fromEntries(
+      SKILL_DEFS.filter((s) => s.fromDex || s.fromEdu).map((s) => [s.name, baseSkillValue(s, attrs)])
+    ),
     /** 自定义子技能名：{ '技艺①': '摄影', '外语①': '拉丁语' } */
     customNames: {},
     derived: d,
@@ -237,19 +244,46 @@ export function createCharacter({ name = '调查员', isPlayer = false } = {}) {
 export function refreshDerived(ch) {
   ch.derived = derive(ch.attrs);
 
-  // 技能里依赖属性的项跟着走
+  // 闪避=DEX/2、母语=EDU 这两项的初始值由属性决定，但它们**也能被加点**。
+  //
+  // 这里要同时满足三件事：
+  //   1) 属性变了，初始值跟着变
+  //   2) 已经加上去的点保留下来
+  //   3) 技能点账目仍然对得上（账目算的是「当前值 − 初始值」）
+  //
+  // 做法：把上一次的初始值记在 ch.skillsBase 里，于是
+  //   加点 = 当前值 − 上次初始值
+  //   新值 = 新初始值 + 加点
+  // 这样属性升降都正确：DEX 涨了闪避跟着涨，DEX 降了闪避也降，但玩家花掉的
+  // 点数始终保留，不会凭空多出来也不会计成"没花过的点"。
+  //
+  // 之前这里是直接赋值 ch.skills[def.name] = baseSkillValue(...)（外加后面又
+  // 单独赋值一次），等于每次改属性都把闪避/母语的加点清零——玩家在编辑器里
+  // 给这两项加的点，随便改个属性就没了。
+  if (!ch.skillsBase || typeof ch.skillsBase !== 'object') ch.skillsBase = {};
+
   for (const def of SKILL_DEFS) {
-    if (def.fromDex || def.fromEdu) {
-      const cur = ch.skills[def.name];
-      // 只在下限被属性决定时同步（玩家加过的点不抹掉）
-      if (cur === undefined || cur <= def.base || cur === 0) {
-        ch.skills[def.name] = baseSkillValue(def, ch.attrs);
-      }
+    if (!def.fromDex && !def.fromEdu) continue;
+
+    const nextBase = baseSkillValue(def, ch.attrs);
+    const cur = Number(ch.skills[def.name]);
+    const prevBase = Number(ch.skillsBase[def.name]);
+
+    if (!Number.isFinite(cur)) {
+      // 还没值：按初始值起步
+      ch.skills[def.name] = nextBase;
+    } else if (Number.isFinite(prevBase)) {
+      // 加点 = 当前值 − 上次初始值；新值 = 新初始值 + 加点
+      const spent = cur - prevBase;
+      // 夹到 0~99：技能值超过 99 无意义，也会让账目乱掉
+      ch.skills[def.name] = Math.max(0, Math.min(99, nextBase + spent));
+    } else {
+      // 老数据没有 skillsBase：无法反推加点，保守地保底不往下压
+      ch.skills[def.name] = Math.max(Math.min(cur, 99), nextBase);
     }
+
+    ch.skillsBase[def.name] = nextBase;
   }
-  // 闪避/母语在 Excel 里恒等于 DEX/2、EDU，这里直接对齐
-  ch.skills['闪避'] = Math.floor(ch.attrs.DEX / 2);
-  ch.skills['母语'] = ch.attrs.EDU;
 
   // HP/MP/SAN 上限同步，当前值不超上限
   ch.hp.max = ch.derived.HP;
@@ -357,6 +391,14 @@ export function normalizeCharacter(ch) {
   out.attrs = { ...base.attrs, ...(ch.attrs || {}) };
   // 技能：以全表为底，保留旧值
   out.skills = { ...base.skills, ...(ch.skills || {}) };
+  // 闪避/母语的初始值快照，用于区分「加点」和「属性带来的初始值」。
+  // 注意：老存档没有这个字段时**不要**拿 base 的默认值顶上——那会让
+  // refreshDerived 误以为「当前值 − 默认初始值」是加点，凭空多算出一截
+  // （实测母语 85 会变成 105）。留空即视为「加点未知」，refreshDerived
+  // 会走保守分支，只保证不低于初始值。
+  out.skillsBase = ch.skillsBase && typeof ch.skillsBase === 'object'
+    ? { ...ch.skillsBase }
+    : {};
   out.customNames = { ...(ch.customNames || {}) };
   out.hp = { ...base.hp, ...(ch.hp || {}) };
   out.mp = { ...base.mp, ...(ch.mp || {}) };

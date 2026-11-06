@@ -992,9 +992,28 @@ group('refreshDerived 联动', () => {
   ok(ch.hp.current <= ch.hp.max, 'HP 当前值被夹到上限');
 
   // 玩家手动加过点的技能不被属性覆盖
-  ch.skills['闪避'] = 80;
+  //
+  // 注意：闪避/母语虽然初始值由属性决定（DEX/2、EDU），但它们**可以加点**——
+  // 27 个职业把闪避列为本职技能（拳击手、警察、士兵、记者…），不能加点就
+  // 说不通了。旧断言「闪避恒等于 DEX/2」与本行注释自相矛盾，实际是
+  // refreshDerived 无条件覆盖导致的 bug，已修复。
+  ch.skills['闪避'] = 80;   // DEX 60 → 初始 30，等于加了 50 点
   refreshDerived(ch);
-  eq(ch.skills['闪避'], 30, '闪避恒等于 DEX/2（Excel 规则）');
+  eq(ch.skills['闪避'], 80, '闪避的加点被保留（30 + 50）');
+
+  // 属性变化时，加点保留、初始值跟着走
+  ch.attrs.DEX = 80;        // 初始值变 40，加的点仍是 50 → 90
+  refreshDerived(ch);
+  eq(ch.skills['闪避'], 90, 'DEX 上涨：初始值跟着涨，加点不丢');
+
+  ch.attrs.DEX = 40;        // 初始值变 20，加的点仍是 50 → 70
+  refreshDerived(ch);
+  eq(ch.skills['闪避'], 70, 'DEX 下降：初始值跟着降，加点不丢也不膨胀');
+
+  // 母语同理（EDU 70 → 初始 70）
+  ch.skills['母语'] = 85;   // 加了 15 点
+  refreshDerived(ch);
+  eq(ch.skills['母语'], 85, '母语的加点被保留（70 + 15）');
 });
 
 group('skillLevels 成功等级', () => {
