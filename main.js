@@ -45,10 +45,13 @@ if (!gotSingleInstanceLock) {
   });
 }
 
-const { registerWindowLifecycle, getWindow } = require('./electron/window');
+const { registerWindowLifecycle, getWindow, openRuleBookWindow } = require('./electron/window');
 const { registerConfigIpc } = require('./electron/config');
 const { registerLlmIpc } = require('./electron/llm');
-const { registerSaveIpc, registerModuleIpc, registerStoreIpc, registerCharIpc } = require('./electron/ipc-files');
+const {
+  registerSaveIpc, registerModuleIpc, registerStoreIpc, registerCharIpc,
+  registerRuleBookIpc, registerRuleBookWindowIpc
+} = require('./electron/ipc-files');
 
 registerConfigIpc();
 registerLlmIpc(getWindow);
@@ -56,6 +59,8 @@ registerSaveIpc();
 registerModuleIpc(getWindow);
 registerStoreIpc();
 registerCharIpc();
+registerRuleBookIpc();
+registerRuleBookWindowIpc(openRuleBookWindow);
 
 crashlog.log('ipc handlers registered');
 

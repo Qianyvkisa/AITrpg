@@ -44,5 +44,10 @@ contextBridge.exposeInMainWorld('api', {
 
   // 通用存储
   getStore: (key) => ipcRenderer.invoke('store:get', key),
-  setStore: (key, value) => ipcRenderer.invoke('store:set', { key, value })
+  setStore: (key, value) => ipcRenderer.invoke('store:set', { key, value }),
+
+  // 规则书
+  openRuleBook: () => ipcRenderer.invoke('rulebook:open'),
+  getRuleBookPath: () => ipcRenderer.invoke('rulebook:path'),
+  openRuleBookExternal: () => ipcRenderer.invoke('rulebook:openExternal')
 });

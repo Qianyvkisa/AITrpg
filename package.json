@@ -1,6 +1,6 @@
 {
   "name": "coc-keeper",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "COC 7th Edition AI Keeper - AI 同时担任守密人与队友调查员",
   "main": "main.js",
   "scripts": {
@@ -25,6 +25,7 @@
       "main.js",
       "preload.js",
       "electron/**/*",
+      "assets/**/*",
       "src/**/*",
       "node_modules/fflate/**/*",
       "node_modules/pdf-parse/**/*"
@@ -35,6 +36,9 @@
       ],
       "artifactName": "${productName}.${ext}"
     },
+    "asarUnpack": [
+      "assets/**/*"
+    ],
     "npmRebuild": false,
     "nodeGypRebuild": false
   },

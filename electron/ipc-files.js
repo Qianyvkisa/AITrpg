@@ -3,8 +3,9 @@
 // ---------------------------------------------------------------------------
 // 存档 / 模组 / 通用键值存储 的 IPC
 // ---------------------------------------------------------------------------
-const { ipcMain, dialog } = require('electron');
+const { ipcMain, dialog, shell } = require('electron');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const fs = require('fs');
 const { readJSON, writeJSON, deleteFile, listFiles } = require('./storage');
 const { readFolder, readSingleFile, materialsToPromptText } = require('./materials');
@@ -271,10 +272,77 @@ function registerCharIpc() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// 规则书 PDF
+//
+// 阅读器是 src/rulebook.html 这个独立窗口，PDF 交给 Chromium 内置的 PDF 阅读器
+// 显示（PDFium 对中文支持成熟，自带缩放/搜索/打印）。
+// 这里只负责：告诉渲染进程 PDF 在哪、以及在需要时用系统阅读器打开。
+//
+// 关键：PDF 必须放在真实磁盘上，不能在 asar 里。
+// Chromium 的 PDF 插件走的是自己的加载路径，读不到 asar 虚拟文件系统，
+// 表现就是 iframe 一片空白。所以 package.json 里用 asarUnpack 把 assets/ 解出来，
+// 这里的路径也要指向 app.asar.unpacked。
+// ---------------------------------------------------------------------------
+function ruleBookPath() {
+  const packed = path.join(__dirname, '..', 'assets', 'coc-kp.pdf');
+  // 打包后 __dirname 形如 .../resources/app.asar/electron，
+  // 同名文件在 app.asar.unpacked 下才是真实文件，优先用它
+  const unpacked = packed.replace(`${path.sep}app.asar${path.sep}`,
+    `${path.sep}app.asar.unpacked${path.sep}`);
+  if (unpacked !== packed && fs.existsSync(unpacked)) return unpacked;
+  return packed;
+}
+
+function registerRuleBookIpc() {
+  /** 返回 PDF 的 file:// URL，供阅读器窗口的 iframe 直接指向 */
+  ipcMain.handle('rulebook:path', () => {
+    const p = ruleBookPath();
+    if (!fs.existsSync(p)) {
+      return { ok: false, error: `找不到规则书文件：${p}` };
+    }
+    // pathToFileURL 会正确处理盘符、空格与中文
+    return { ok: true, url: pathToFileURL(p).href, path: p };
+  });
+  /** 用系统默认阅读器打开（应用内阅读器出问题时的退路） */
+  ipcMain.handle('rulebook:openExternal', async () => {
+    const p = ruleBookPath();
+    if (!fs.existsSync(p)) return { ok: false, error: '找不到规则书文件' };
+    try {
+      const err = await shell.openPath(p);
+      // openPath 不抛异常，失败时返回非空字符串
+      return err ? { ok: false, error: err } : { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+}
+
 // 通用键值存储（世界观笔记等）
 function registerStoreIpc() {
   ipcMain.handle('store:get', (_e, key) => readJSON(`${key}.json`, null));
   ipcMain.handle('store:set', (_e, { key, value }) => writeJSON(`${key}.json`, value));
 }
 
-module.exports = { registerSaveIpc, registerModuleIpc, registerStoreIpc, registerCharIpc };
+// ---------------------------------------------------------------------------
+// 打开规则书窗口
+//
+// 窗口创建在 electron/window.js 里（那里管窗口生命周期），
+// 这里只负责把「点按钮 → 开窗口」这条 IPC 接上。
+// 传函数而不是直接 require，是为了避免 window.js 与 ipc-files.js 互相依赖。
+// ---------------------------------------------------------------------------
+function registerRuleBookWindowIpc(openWindow) {
+  ipcMain.handle('rulebook:open', () => {
+    try {
+      openWindow();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+}
+
+module.exports = {
+  registerSaveIpc, registerModuleIpc, registerStoreIpc, registerCharIpc,
+  registerRuleBookIpc, registerRuleBookWindowIpc
+};

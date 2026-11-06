@@ -72,6 +72,52 @@ function focusExistingWindow() {
   bringToFront();
 }
 
+// ---------------------------------------------------------------------------
+// 规则书窗口
+//
+// 独立窗口而不是主窗口里的弹窗：418 页的 PDF 放进弹窗会挤成一窄条，
+// 独立窗口能记住自己的尺寸，也能和主窗口并排放，方便边看规则边开局。
+// ---------------------------------------------------------------------------
+let rbWin = null;
+
+function openRuleBookWindow() {
+  if (rbWin && !rbWin.isDestroyed()) {
+    rbWin.focus();
+    return rbWin;
+  }
+
+  rbWin = new BrowserWindow({
+    width: 1280,
+    height: 900,
+    minWidth: 900,
+    minHeight: 600,
+    backgroundColor: '#0a0b0f',
+    title: '规则书 · 克苏鲁的呼唤 第七版',
+    autoHideMenuBar: true,
+    parent: win && !win.isDestroyed() ? win : undefined,
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      // Chromium 自带的 PDF 阅读器需要 plugins 才能启用；
+      // 少了这一项 iframe 指向 .pdf 会变成下载而不是显示
+      plugins: true
+    }
+  });
+
+  rbWin.loadFile(path.join(__dirname, '..', 'src', 'rulebook.html'));
+  rbWin.on('closed', () => { rbWin = null; });
+
+  // PDF 阅读器内部可能想开新窗口（如打印预览），交给系统浏览器处理
+  rbWin.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^(https?|mailto):/i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  return rbWin;
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1440,
@@ -129,4 +175,6 @@ function registerWindowLifecycle() {
   });
 }
 
-module.exports = { createWindow, getWindow, registerWindowLifecycle, focusExistingWindow };
+module.exports = {
+  createWindow, getWindow, registerWindowLifecycle, focusExistingWindow, openRuleBookWindow
+};

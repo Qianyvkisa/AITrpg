@@ -316,6 +316,15 @@ function bindUI() {
   $('#menuSaves').onclick = openSaveDialog;
   $('#menuChars').onclick = () => openCharLibrary({ state, api: window.api });
   $('#menuModules').onclick = () => openModules(state, () => renderAll(state, panelHandlers));
+  $('#menuRuleBook').onclick = async () => {
+    // window.api 只在 Electron 里存在；浏览器里跑验证页时如实提示，不抛红字
+    if (!window.api || !window.api.openRuleBook) {
+      alert('规则书需要在应用内打开。');
+      return;
+    }
+    const r = await window.api.openRuleBook();
+    if (!r || !r.ok) alert('打不开规则书：' + ((r && r.error) || '未知原因'));
+  };
   $('#menuSettings').onclick = () =>
     openSettings(state, () => {
       renderAll(state, panelHandlers);

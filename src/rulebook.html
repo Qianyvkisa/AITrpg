@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'; frame-src 'self' file:">
+<title>规则书 · 克苏鲁的呼唤 第七版</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="rb-window">
+
+<div class="rb-wrap">
+  <!-- 左侧：章节索引 -->
+  <aside class="rb-side">
+    <div class="rb-side-head">
+      <h1>规则书</h1>
+      <p>克苏鲁的呼唤 · 第七版</p>
+    </div>
+
+    <div class="rb-search-wrap">
+      <input id="rbSearch" class="rb-search" type="search"
+             placeholder="搜索章节，如「战斗」「理智」" autocomplete="off">
+      <button class="rb-search-clear" id="rbSearchClear" title="清除">×</button>
+    </div>
+
+    <nav class="rb-tree" id="rbTree"></nav>
+
+    <div class="rb-side-foot">
+      <span id="rbCount" class="rb-count"></span>
+    </div>
+  </aside>
+
+  <!-- 右侧：PDF 页面 -->
+  <section class="rb-main">
+    <div class="rb-toolbar">
+      <button class="btn btn-sm" id="rbPrev" title="上一页（←）">‹ 上一页</button>
+      <span class="rb-pageinfo">
+        第 <input id="rbPageInput" class="rb-page-input" type="number" min="1" max="418" value="1"> 页
+        <span class="rb-total">/ 418</span>
+      </span>
+      <button class="btn btn-sm" id="rbNext" title="下一页（→）">下一页 ›</button>
+      <span class="rb-spacer"></span>
+      <span class="rb-crumb" id="rbCrumb"></span>
+      <button class="btn btn-sm" id="rbExternal" title="用系统默认阅读器打开">系统打开</button>
+    </div>
+
+    <div class="rb-frame-wrap" id="rbFrameWrap">
+      <iframe id="rbFrame" class="rb-frame" title="规则书页面"></iframe>
+      <div class="rb-status" id="rbStatus">正在载入规则书…</div>
+    </div>
+  </section>
+</div>
+
+<script type="module" src="rulebook.js"></script>
+</body>
+</html>
