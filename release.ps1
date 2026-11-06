@@ -87,6 +87,20 @@ if ($SkipTest) {
   Ok "全部测试通过（$($all.Count) 个文件）"
 }
 
+# ---- 1.5 版本一致性检查 ----------------------------------------------------
+# 踩过的坑：提交信息里写了 "v0.1.5"，但 package.json 还是 0.1.4，
+# 结果 exe 版本号对不上提交信息，发出去的东西和记录不一致。
+# 这里做一次交叉校验：提交信息里出现的 vX.Y.Z 必须和 package.json 一致。
+$pkgVersion = (Get-Content (Join-Path $root 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version
+if ($Message -and ($Message -match 'v(\d+\.\d+\.\d+)')) {
+  $claimed = $Matches[1]
+  if ($claimed -ne $pkgVersion) {
+    Die "提交信息里写的是 v$claimed，但 package.json 是 $pkgVersion。先改 package.json 再发布。"
+  }
+  Ok "版本一致：v$pkgVersion"
+} else {
+  Ok "当前版本：v$pkgVersion"
+}
 # ---- 2. 打包 exe -----------------------------------------------------------
 Step 2 '打包 exe'
 # 本机代理有中间人证书，不加这个会报 unable to verify the first certificate
@@ -130,3 +144,4 @@ if ($LASTEXITCODE -ne 0) { Die '推送失败（多半是没登录，见下方提
 Ok '推送完成'
 
 Write-Host "`n全部完成。" -ForegroundColor Green
+exit 0
