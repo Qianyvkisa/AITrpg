@@ -52,3 +52,14 @@ _*.txt
 # 缺文件时应用会提示，并给出「用系统阅读器打开」的退路。
 assets/*.pdf
 assets/coc-kp.pdf
+
+# ---- 开发用的独立 Electron ----
+# node_modules 里那份带 Windows Low 完整性标签，直接启动会返回 0x80000003；
+# 排查界面问题时临时解压一份干净的到 .dev-electron/ 用。
+# 它是 234 MB 的运行时，不入库。
+.dev-electron/
+
+# ---- 界面验证截图 ----
+# tools/ui/shots 是跑截图工具时生成的产物（每张几百 KB，且可随时重跑）。
+# 只保留脚本，不保留图片和报告。
+tools/ui/shots/

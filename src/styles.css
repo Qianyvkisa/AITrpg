@@ -1794,17 +1794,25 @@ select:disabled {
   white-space: nowrap;
 }
 
-.rb-frame-wrap {
+.rb-viewer {
   position: relative;
   flex: 1;
   min-height: 0;
+  overflow: auto;
   background: #20242c;
+  /* 页面居中：窄页面时不贴左，宽页面时靠滚动 */
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 12px;
 }
-.rb-frame {
-  width: 100%;
-  height: 100%;
-  border: none;
+
+/* pdfjs 画出的页面画布 */
+.rb-viewer canvas {
   display: block;
+  background: #fff;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, .45);
+  flex: 0 0 auto;
 }
 
 .rb-status {
@@ -1818,6 +1826,8 @@ select:disabled {
   color: var(--ink-dim);
   text-align: center;
   padding: 24px;
+  /* 盖住画布，载入中不留半张旧图 */
+  z-index: 2;
 }
 .rb-status[hidden] { display: none; }
 

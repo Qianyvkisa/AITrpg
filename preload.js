@@ -49,5 +49,6 @@ contextBridge.exposeInMainWorld('api', {
   // 规则书
   openRuleBook: () => ipcRenderer.invoke('rulebook:open'),
   getRuleBookPath: () => ipcRenderer.invoke('rulebook:path'),
+  getRuleBookBase64: () => ipcRenderer.invoke('rulebook:base64'),
   openRuleBookExternal: () => ipcRenderer.invoke('rulebook:openExternal')
 });

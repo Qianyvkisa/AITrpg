@@ -316,6 +316,22 @@ function registerRuleBookIpc() {
       return { ok: false, error: e.message };
     }
   });
+
+  /**
+   * 以 base64 交出 PDF 字节流。
+   * 给应用内渲染器用（pdfjs 需要字节，而渲染进程读不到 file://）。
+   * 8 MB 的 PDF 转 base64 约 11 MB，一次传输，之后由 pdfjs 在内存里持有。
+   */
+  ipcMain.handle('rulebook:base64', () => {
+    const p = ruleBookPath();
+    try {
+      if (!fs.existsSync(p)) return { ok: false, error: `找不到规则书文件：${p}` };
+      const buf = fs.readFileSync(p);
+      return { ok: true, data: buf.toString('base64'), bytes: buf.length };
+    } catch (e) {
+      return { ok: false, error: `读取规则书失败：${e.message}` };
+    }
+  });
 }
 
 // 通用键值存储（世界观笔记等）

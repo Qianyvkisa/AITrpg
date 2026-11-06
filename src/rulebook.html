@@ -2,8 +2,9 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<!-- pdfjs 需要 worker（blob:）与 canvas 内联样式；cMap/字体都从本地 vendor 读，不连外网 -->
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'; frame-src 'self' file:">
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'; worker-src 'self' blob:; connect-src 'self' blob: data:">
 <title>规则书 · 克苏鲁的呼唤 第七版</title>
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -44,8 +45,7 @@
       <button class="btn btn-sm" id="rbExternal" title="用系统默认阅读器打开">系统打开</button>
     </div>
 
-    <div class="rb-frame-wrap" id="rbFrameWrap">
-      <iframe id="rbFrame" class="rb-frame" title="规则书页面"></iframe>
+    <div class="rb-viewer" id="rbViewer">
       <div class="rb-status" id="rbStatus">正在载入规则书…</div>
     </div>
   </section>

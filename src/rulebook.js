@@ -1,14 +1,19 @@
 // ---------------------------------------------------------------------------
 // 规则书阅读器逻辑
 //
-// 页面本身交给 Chromium 内置的 PDF 阅读器（PDFium），我们只负责：
-//   1) 左侧章节树（来自 PDF 书签，176 条，可搜索）
-//   2) 点击章节 → 让右侧 PDF 跳到对应页（通过 #page=N 锚点）
+// 渲染方式：用 pdfjs 自己画到 canvas，不再用 iframe 套 Chromium 内置阅读器。
 //
-// 为什么不用 pdfjs 自己画：
-//   pdfjs 渲染中文 PDF 需要额外配置 cMap 与字体资源，链路长、失败点分散；
-//   而 PDFium 是 Chromium 自带的，中文支持成熟，还自带缩放/搜索/打印。
-//   代价是页码跳转只能靠 URL 锚点，够用。
+// 为什么换掉内置阅读器：
+//   内置阅读器（PDFium）只认 URL 上的 #page=N 锚点，而改 iframe 的 src 是
+//   "重新导航"，PDF 已加载过时 Chromium 不会真的跳到新页——表现就是点了目录
+//   右侧纹丝不动。它内部状态我们拿不到，也改不了。
+//   pdfjs 是自己算页面、自己画，跳到第几页完全由我们决定，还能精确知道
+//   "这一页画完了没有"，可以给出真实的载入反馈。
+//
+// 中文 PDF 的两个必要条件（少一个就会画出空白或方块）：
+//   1) cMapUrl    —— 预定义编码表，中文 CID 字体靠它把字符映射到字形
+//   2) standardFontDataUrl —— 14 种标准字体的替代数据
+//   两者都在 src/vendor/ 下随应用一起打包。
 // ---------------------------------------------------------------------------
 import { RULE_BOOK_PAGES, RULE_BOOK_TOTAL } from './core/ruleBookIndex.js';
 
@@ -17,7 +22,7 @@ const $ = (id) => document.getElementById(id);
 const tree = $('rbTree');
 const search = $('rbSearch');
 const searchClear = $('rbSearchClear');
-const frame = $('rbFrame');
+const viewer = $('rbViewer');
 const status = $('rbStatus');
 const pageInput = $('rbPageInput');
 const crumb = $('rbCrumb');
@@ -26,8 +31,15 @@ const prevBtn = $('rbPrev');
 const nextBtn = $('rbNext');
 const externalBtn = $('rbExternal');
 
-let pdfUrl = null;      // PDF 的 file:// URL
-let current = 1;
+let pdfDoc = null;        // pdfjs 文档对象
+let current = 1;          // 当前页（1 起）
+let rendering = false;    // 正在渲染，避免连续点击造成并发绘制
+let pending = null;       // 渲染期间又有新的跳页请求，记下来等这次画完再执行
+let zoom = 1;             // 缩放倍数
+let baseViewport = null;  // 当前页 scale=1 时的尺寸
+
+// 渲染队列：pdfjs 不允许同一 canvas 同时渲染两次，这里串行化
+let chain = Promise.resolve();
 
 // ---------------------------------------------------------------------------
 // 章节树
@@ -82,17 +94,18 @@ function renderTree(query = '') {
   tree.querySelectorAll('.rb-item').forEach((btn) => {
     btn.onclick = () => goToPage(Number(btn.dataset.page), btn.dataset.title, btn);
   });
+  markActive();
 }
 
-/** 标出当前页对应的章节（可能有多个条目同页，取最后一个一级章节） */
+/** 标出当前页对应的章节条目 */
 function markActive() {
+  const items = tree.querySelectorAll('.rb-item');
   let best = null;
-  for (const btn of tree.querySelectorAll('.rb-item')) {
+  for (const btn of items) {
     const p = Number(btn.dataset.page);
     btn.classList.toggle('active', p === current);
     if (p <= current) best = btn;
   }
-  // 滚到可见区域，但不要抢走用户正在滚动的视图
   const active = tree.querySelector('.rb-item.active');
   if (active) active.scrollIntoView({ block: 'nearest' });
   return best;
@@ -108,17 +121,11 @@ function titleForPage(page) {
 }
 
 // ---------------------------------------------------------------------------
-// 翻页
+// 渲染
 // ---------------------------------------------------------------------------
 
-/**
- * 让 PDF 跳到指定页。
- * Chromium 的 PDF 阅读器认 URL 里的 #page=N 锚点；改 hash 不会重新加载整个文档，
- * 但为了确保生效，这里用整段 src 重设（PDF 已在缓存里，不会重新下载）。
- */
-function goToPage(page, title, fromBtn) {
-  const target = Math.max(1, Math.min(Number(page) || 1, RULE_BOOK_TOTAL));
-  current = target;
+/** 更新工具栏上的页码/按钮状态 */
+function syncToolbar(target, title, fromBtn) {
   pageInput.value = String(target);
   prevBtn.disabled = target <= 1;
   nextBtn.disabled = target >= RULE_BOOK_TOTAL;
@@ -130,11 +137,103 @@ function goToPage(page, title, fromBtn) {
   } else {
     markActive();
   }
+}
 
-  if (pdfUrl) {
-    // toolbar=0 让内置工具栏尽量不抢空间；navpanes=0 关掉它自己的侧栏
-    frame.src = `${pdfUrl}#page=${target}&toolbar=0&navpanes=0`;
+/** 让画布尺寸跟随容器宽度，保证页面铺满又不溢出 */
+function fitZoom() {
+  if (!baseViewport) return 1;
+  const pad = 24;
+  const avail = viewer.clientWidth - pad;
+  const availH = viewer.clientHeight - pad;
+  if (avail <= 0 || availH <= 0) return zoom;
+  // 同时考虑宽高，取较小的缩放，避免页面被裁掉
+  const z = Math.min(avail / baseViewport.width, availH / baseViewport.height);
+  return Math.max(0.4, Math.min(z, 3));
+}
+
+/** 真正把某一页画到 canvas 上 */
+async function drawPage(target) {
+  if (!pdfDoc) return;
+  const page = await pdfDoc.getPage(target);
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  // 以容器尺寸计算缩放，并叠加设备像素比，保证高分屏下文字清晰
+  const vp1 = page.getViewport({ scale: 1 });
+  baseViewport = { width: vp1.width, height: vp1.height };
+
+  const cssZoom = fitZoom() * zoom;
+  const dpr = window.devicePixelRatio || 1;
+  const vp = page.getViewport({ scale: cssZoom * dpr });
+
+  canvas.width = Math.floor(vp.width);
+  canvas.height = Math.floor(vp.height);
+  // CSS 尺寸与逻辑尺寸一致，画布内部分辨率才是 dpr 倍
+  canvas.style.width = Math.floor(vp.width / dpr) + 'px';
+  canvas.style.height = Math.floor(vp.height / dpr) + 'px';
+
+  // 先铺白底：PDF 页面本身是透明的，不铺白底会看到黑背景
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+
+  // 换页时整块替换，避免旧页面残留
+  viewer.innerHTML = '';
+  viewer.appendChild(canvas);
+  viewer.scrollTop = 0;
+
+  page.cleanup();
+
+  // 对外暴露"这一页确实画完了"的信号。
+  // 界面本身不读它，但自动化验证要靠它判断渲染是否结束——
+  // 只看画布存在不够（画布在渲染前就建好了）。
+  window.__rbRendered = { page: target, done: true, at: Date.now() };
+}
+
+/**
+ * 跳到指定页。
+ * 用 promise 链串行，保证同一时刻只有一个渲染在跑；
+ * 若渲染期间用户又点了别的章节，只保留最后一次请求（跳过中间页）。
+ */
+function goToPage(page, title, fromBtn) {
+  const target = Math.max(1, Math.min(Number(page) || 1, RULE_BOOK_TOTAL));
+  current = target;
+  syncToolbar(target, title, fromBtn);
+
+  if (!pdfDoc) return;
+
+  if (rendering) {
+    // 正在画：记下最新目标，等这次结束后直接画它
+    pending = target;
+    return;
   }
+
+  rendering = true;
+  window.__rbRendered = null;
+  chain = chain.then(async () => {
+    try {
+      status.hidden = false;
+      status.textContent = `正在载入第 ${target} 页…`;
+      await drawPage(target);
+      status.hidden = true;
+    } catch (e) {
+      status.hidden = false;
+      status.innerHTML = `<div class="rb-error"><p>第 ${target} 页渲染失败：${esc(e.message)}</p>
+        <p class="rb-error-hint">可点右上角「系统打开」用默认阅读器查看。</p></div>`;
+    } finally {
+      rendering = false;
+      // 渲染期间积压的请求：只执行最后一个
+      if (pending !== null && pending !== target) {
+        const next = pending;
+        pending = null;
+        goToPage(next);
+      } else {
+        pending = null;
+      }
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +241,6 @@ function goToPage(page, title, fromBtn) {
 // ---------------------------------------------------------------------------
 
 async function init() {
-  // 页数上限由索引常量决定，不写死在 HTML 里，避免两处数字对不上
   pageInput.max = String(RULE_BOOK_TOTAL);
   const totalEl = document.querySelector('.rb-total');
   if (totalEl) totalEl.textContent = `/ ${RULE_BOOK_TOTAL}`;
@@ -170,6 +268,8 @@ async function init() {
     if (e.target === search || e.target === pageInput) return;
     if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); goToPage(current - 1); }
     if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); goToPage(current + 1); }
+    if (e.key === '=' || e.key === '+') { e.preventDefault(); setZoom(zoom + 0.15); }
+    if (e.key === '-') { e.preventDefault(); setZoom(zoom - 0.15); }
   });
 
   externalBtn.onclick = async () => {
@@ -178,22 +278,47 @@ async function init() {
     if (!r || !r.ok) alert('打不开规则书：' + ((r && r.error) || '未知原因'));
   };
 
-  // 向主进程要 PDF 的真实路径
+  // 窗口尺寸变化时重排当前页（防抖，避免拖动窗口时疯狂重绘）
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (!pdfDoc) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      // 重绘当前页，保持所在位置
+      rendering = false;
+      pending = null;
+      goToPage(current, crumb.textContent);
+    }, 200);
+  });
+
   try {
-    if (!window.api || !window.api.getRuleBookPath) {
+    if (!window.api || !window.api.getRuleBookBase64) {
       throw new Error('这个环境里没有 Electron 接口（预览页？）');
     }
-    const res = await window.api.getRuleBookPath();
-    if (!res || !res.ok) throw new Error((res && res.error) || '无法定位规则书');
-    pdfUrl = res.url;
-    frame.onload = () => { status.hidden = true; };
-    frame.onerror = () => {
-      status.hidden = false;
-      status.textContent = '规则书载入失败。可点右上角「系统打开」用默认阅读器查看。';
-    };
+
+    status.hidden = false;
+    status.textContent = '正在载入规则书…';
+
+    const b64 = await window.api.getRuleBookBase64();
+    if (!b64 || !b64.ok) throw new Error((b64 && b64.error) || '无法读取规则书');
+
+    // base64 → 字节流（pdfjs 要的是字节，不是字符串）
+    const bin = atob(b64.data);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+
+    const pdfjs = await import('./vendor/pdf.min.mjs');
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdf.worker.min.mjs', import.meta.url).href;
+
+    pdfDoc = await pdfjs.getDocument({
+      data: bytes,
+      // 中文 PDF 的关键两项，缺了会画成空白
+      cMapUrl: new URL('./vendor/cmaps/', import.meta.url).href,
+      cMapPacked: true,
+      standardFontDataUrl: new URL('./vendor/standard_fonts/', import.meta.url).href
+    }).promise;
+
     goToPage(1);
-    // 兜底：万一 onload 没触发，别让"正在载入"一直挂着
-    setTimeout(() => { status.hidden = true; }, 6000);
   } catch (e) {
     status.hidden = false;
     status.innerHTML = `<div class="rb-error">
@@ -201,6 +326,14 @@ async function init() {
       <p class="rb-error-hint">文件应在 assets/coc-kp.pdf。若你拿到的是安装版，可能被安全软件拦截。</p>
     </div>`;
   }
+}
+
+/** 缩放：改倍数后重绘当前页 */
+function setZoom(z) {
+  const next = Math.max(0.5, Math.min(Number(z) || 1, 3));
+  if (Math.abs(next - zoom) < 0.01) return;
+  zoom = next;
+  goToPage(current, crumb.textContent);
 }
 
 init();
