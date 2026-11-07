@@ -1,4 +1,4 @@
-﻿# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # 一键发布：测试 → 打包 exe → 提交 → 推送
 #
 # 用法：
@@ -105,6 +105,9 @@ if ($Message -and ($Message -match 'v(\d+\.\d+\.\d+)')) {
 Step 2 '打包 exe'
 # 本机代理有中间人证书，不加这个会报 unable to verify the first certificate
 $env:NODE_OPTIONS = '--use-system-ca'
+# 先应用自定义便携版启动器模板（跳过重复解压，让动画能立刻出现），再打包
+& $node tools\patch-portable-nsi.mjs
+if ($LASTEXITCODE -ne 0) { Die '应用便携版模板失败' }
 & $node node_modules\electron-builder\out\cli\cli.js --win portable
 if ($LASTEXITCODE -ne 0) { Die '打包失败' }
 & $node tools\move-artifact.mjs

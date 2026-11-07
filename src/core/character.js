@@ -198,6 +198,17 @@ export function createCharacter({ name = '调查员', isPlayer = false } = {}) {
     ),
     /** 自定义子技能名：{ '技艺①': '摄影', '外语①': '拉丁语' } */
     customNames: {},
+    /**
+     * 职业「任意特长」选中的技能名列表。
+     *
+     * 225 个职业里有 152 个带「任意特长可选 N 项」（occupations.js 的 free 字段）。
+     * 这些职业光靠 fixed 列表里的几项本职技能，技能点根本花不完——
+     * 实测贵族剩 152 点、医生剩 25 点无处可去，账目永远平不了。
+     *
+     * 原版规则里这 N 项由玩家自选，选中后就算本职技能。这里记下选了哪些，
+     * isOccupationalSkill 会把它们纳入本职范围。
+     */
+    occFreeSkills: [],
     derived: d,
     // 状态
     hp: { current: d.HP, max: d.HP },
@@ -400,6 +411,10 @@ export function normalizeCharacter(ch) {
     ? { ...ch.skillsBase }
     : {};
   out.customNames = { ...(ch.customNames || {}) };
+  // 「任意特长」选中的技能：只留字符串，去重，防止存档被写脏
+  out.occFreeSkills = Array.isArray(ch.occFreeSkills)
+    ? [...new Set(ch.occFreeSkills.filter((x) => typeof x === 'string' && x))]
+    : [];
   out.hp = { ...base.hp, ...(ch.hp || {}) };
   out.mp = { ...base.mp, ...(ch.mp || {}) };
   out.san = { ...base.san, ...(ch.san || {}) };

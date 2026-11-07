@@ -1,4 +1,4 @@
-// ---------------------------------------------------------------------------
+﻿// ---------------------------------------------------------------------------
 // 角色卡编辑器渲染冒烟测试
 // 用最小 DOM 桩执行 openCharEditor，确认各标签页能渲染、collect 能收集
 // ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ function parseInto(html, container) {
     container.appendChild(el);
   }
   // 带 data-attr / data-skill 等属性的 input 也要能找到
-  const dataOnlyRe = /<(\w+)[^>]*\b(data-(?:attr|skill|custom|bg|w|e|s|levels|hint|wi|ei|si|tab|mode|count|act|step-up|step-down|reset-skill|skillrow|suggest))="([^"]*)"[^>]*>/g;
+  const dataOnlyRe = /<(\w+)[^>]*\b(data-(?:attr|skill|custom|bg|w|e|s|levels|hint|wi|ei|si|tab|mode|count|act|step-up|step-down|reset-skill|skillrow|suggest|free))="([^"]*)"[^>]*>/g;
   while ((m = dataOnlyRe.exec(html))) {
     const el = new El(m[1]);
     const raw = m[2].slice(5);
@@ -321,6 +321,51 @@ const mythosInput = backdrop.querySelector('[data-skill="克苏鲁神话"]');
 ok(mythosInput, '克苏鲁神话有值节点');
 ok(mythosInput && mythosInput.tagName !== 'INPUT', '克苏鲁神话的值不是可编辑输入框');
 ok(skillsPageHtml.includes('不可加点'), '页面上明确标注不可加点');
+
+// ---- 「任意特长」开关 ----
+//
+// 152/225 个职业带「任意特长可选 N 项」。光靠固定本职技能点数花不完，
+// 得让玩家指定哪几项算特长。这里验证技能行上确实渲染出了开关。
+{
+  const freeRow = backdrop.querySelector('[data-free="侦查"]');
+  // 记者没有 free 名额 → 不该出现特长开关
+  ok(!freeRow, '没有任意特长名额的职业不显示特长开关');
+}
+
+// 换一个带 free 的职业（贵族：free 3）再看。
+//
+// 注意：这个 DOM 桩不保留 innerHTML，切页后 #fOcc 拿不到，
+// 所以没法走「在基本信息页改职业」的路径。直接重开一个编辑器，
+// 用一张职业已经是贵族的卡来验证渲染。
+{
+  const { findOccupation } = await import('../src/core/occupations.js');
+  const noble = findOccupation('贵族');
+  ok((noble?.free || 0) > 0, '贵族职业带任意特长名额');
+
+  const nobleCh = createCharacter({ name: '贵族调查员', isPlayer: true });
+  nobleCh.occupation = '贵族';
+
+  modalRoot.children.length = 0;   // 清掉上一个弹窗
+  openCharEditor(nobleCh, { title: '特长测试', allowAIGen: false });
+  const nb = modalRoot.children[0];
+  const nTabs = nb.querySelectorAll('.ce-tab');
+  const nSkillTab = nTabs.find((t) => t.dataset.tab === 'skills');
+  nSkillTab.onclick();
+
+  const freeBtn = nb.querySelector('[data-free="侦查"]');
+  ok(freeBtn, '带任意特长名额的职业显示特长开关');
+
+  // 点一下：该项应被标成「特长」，且账目里的特长计数跟着变。
+  //
+  // 编辑器改的是内部副本 work（取消时不污染原卡），所以这里不能断言
+  // nobleCh 被改了——要断言 UI 的反应：按钮变成选中态。
+  if (freeBtn) {
+    freeBtn.onclick();
+    const afterBtn = nb.querySelector('[data-free="侦查"]');
+    ok(afterBtn && afterBtn.className.includes('is-on'),
+      '点了特长开关后按钮变成选中态');
+  }
+}
 
 // 切到背景页
 const bgTab = tabs.find((t) => t.dataset.tab === 'bg');

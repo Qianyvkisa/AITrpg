@@ -6,7 +6,7 @@
 
 双击 `COC跑团.exe` 即可。
 
-这个 exe 是便携版：不需要安装，不需要 Node 环境，不依赖项目里的任何其他文件，复制到任意目录都能运行。首次启动会在临时目录里自解压，大约需要 10~20 秒，之后启动更快。
+这个 exe 是便携版：不需要安装，不需要 Node 环境，不依赖项目里的任何其他文件，复制到任意目录都能运行。首次双击会先在后台静默解压（约 10 秒，期间没有任何窗口），解压完成后立刻进入加载动画；之后每次双击约 0.2 秒就能看到动画。
 
 ## 界面结构
 
@@ -186,3 +186,63 @@ tests/
 API Key 存在主进程的配置文件里（`%APPDATA%\coc-keeper\data\config.json`），不会进入网页层。所有请求由主进程发起，避免跨域问题。
 
 队友可以用另一套模型省钱：设置里的「队友模型」填本地小模型，KP 用大模型。
+
+## 打包与启动速度
+
+`npm run dist` 会依次应用便携版启动器模板、打包、把产物移到根目录。
+
+### 启动动画为什么之前出不来
+
+便携版每次双击都要先把整个包解压一遍，**这段发生在 Electron 启动之前**。实测解压耗时约 10 秒，而这 10 秒里 Electron 还没被拉起，`src/splash.html` 的加载动画物理上不可能显示。
+
+早期为此在 NSIS 启动器里嵌了一张静态图（`build/splash.bmp`），结果是「先看到一张静止的图，之后才看到动画」——图只是把空白填满，并不能动。
+
+现在改成两条：
+
+1. **去掉静态图**，不再有那张静止画面
+2. **缓存解压结果**，让后续启动不再重复解压
+
+缓存的做法是给 `portable.unpackDirName` 一个固定名字（`coc-keeper-ai-app`），启动器把它解压到 `%LOCALAPPDATA%\coc-keeper-ai-app`，并写入一个「版本 + 构建指纹」的戳文件（`.unpack-stamp`）。下次双击时戳一致就直接启动 Electron，跳过解压。
+
+放 `%LOCALAPPDATA%` 而不是 `%TEMP%`：后者会被磁盘清理工具随手删掉，缓存白建。
+
+实测效果：
+
+| | 启动器阶段 | 双击到看见动画 |
+|---|---|---|
+| 首次（无缓存） | ~10.0 秒 | ~10.2 秒 |
+| 之后每次 | ~50 毫秒 | **~200 毫秒** |
+
+首次那 10 秒是静默等待（无窗口、无静态图），文件必须真的落盘一次。
+
+### 指纹为什么不能只用版本号
+
+缓存命中后启动器会直接跑缓存目录里的旧程序。如果只按 `version` 判断，改了代码但没升版本时，用户机器上会一直跑旧代码而且毫无察觉——这比启动慢严重得多。
+
+所以戳里带一个构建指纹：`tools/patch-portable-nsi.mjs` 会对会打进 asar 的源码做内容哈希，任何实质改动都会让缓存失效。同时排除 `*.log` 这类运行时产物——否则程序每启动一次指纹就变一次，缓存永远命中不了。
+
+### 这个模板是怎么生效的
+
+electron-builder 的 portable 目标不接受自定义脚本（`NsisTarget.js` 里写死读模板，只有 installer 目标支持 `nsis.script`），所以 `tools/patch-portable-nsi.mjs` 在打包前把 `build/portable.nsi` 覆盖到 `app-builder-lib/templates/nsis/portable.nsi`，原模板备份为 `.orig`。
+
+升级 electron-builder 后，要对照新版 `portable.nsi` 检查 `build/portable.nsi` 是否需要跟进。
+
+### 验证工具
+
+```powershell
+npm run verify:stamp      # 指纹：稳定、对源码敏感、不受日志影响
+npm run verify:startup    # 首次 vs 二次启动耗时
+node tools/verify-portable-cache.mjs   # 端到端：缓存命中、戳失效重解压、运行中不删坏文件
+```
+
+改动打包配置后，建议再跑 `node tools/test-pdf-packed.mjs` 确认打包产物里的 PDF 提取没被打断。
+
+包体积也做了裁剪，解压量从 470MB 降到 355MB：
+
+- `electronLanguages` 只留 `zh-CN` / `en-US`，其余 53 个语言包（48MB）不打包
+- 排除 `@napi-rs/canvas`（35MB 的 skia 图形库）。它是 `pdf-parse` 的可选依赖，只影响 PDF 渲染；我们只用文字提取，实测排除后提取结果完全一致
+- 排除 `pdfjs-dist` 的 `web` / `types` / `image_decoders` 与所有 `.map`，文字提取不需要
+
+### 排查启动问题时注意
+
+本机若存在环境变量 `ELECTRON_RUN_AS_NODE=1`，Electron 会退化成纯 Node 进程，窗口完全不出现，且没有任何报错。排查「双击没反应」时先确认它没被设置。

@@ -1,13 +1,16 @@
 {
   "name": "coc-keeper",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "COC 7th Edition AI Keeper - AI 同时担任守密人与队友调查员",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "test": "node tests/rules.test.mjs && node tests/unit.test.mjs && node tests/occupations.test.mjs && node tests/charStore.test.mjs && node tests/charGen.points.test.mjs && node tests/charEditor.smoke.mjs && node tests/gameSetup.smoke.mjs && node tests/messages.dom.test.mjs && node tests/ruleBook.test.mjs",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder --win portable && node tools/move-artifact.mjs"
+    "patch:nsis": "node tools/patch-portable-nsi.mjs",
+    "verify:startup": "node tools/verify-startup.mjs",
+    "verify:stamp": "node tools/verify-cache-stamp.mjs",
+    "dist": "npm run patch:nsis && electron-builder --win portable && node tools/move-artifact.mjs"
   },
   "author": "",
   "license": "MIT",
@@ -28,7 +31,13 @@
       "assets/**/*",
       "src/**/*",
       "node_modules/fflate/**/*",
-      "node_modules/pdf-parse/**/*"
+      "node_modules/pdf-parse/**/*",
+      "node_modules/pdfjs-dist/**/*",
+      "!node_modules/pdfjs-dist/{web,types,image_decoders}/**/*",
+      "!node_modules/pdfjs-dist/**/*.map",
+      "!node_modules/@napi-rs/**/*",
+      "!node_modules/pdf-parse/dist/pdf-parse/web/**/*",
+      "!node_modules/pdf-parse/dist/**/*.map"
     ],
     "win": {
       "target": [
@@ -36,6 +45,13 @@
       ],
       "artifactName": "${productName}.${ext}"
     },
+    "portable": {
+      "unpackDirName": "coc-keeper-ai-app"
+    },
+    "electronLanguages": [
+      "zh-CN",
+      "en-US"
+    ],
     "asarUnpack": [
       "assets/**/*"
     ],

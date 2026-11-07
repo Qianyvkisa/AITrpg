@@ -13,8 +13,10 @@
 // 账目用 skillPointBudget 计算——和角色卡编辑器里显示的完全一致。
 // ---------------------------------------------------------------------------
 
-import { charFromAI, fillSkillPoints } from '../src/services/charGen.js';
-import { skillPointBudget, isOccupationalSkill } from '../src/core/occupations.js';
+import { charFromAI, fillSkillPoints, randomCharacter } from '../src/services/charGen.js';
+import {
+  skillPointBudget, isOccupationalSkill, findOccupation, SOCIAL_SKILLS
+} from '../src/core/occupations.js';
 import { SKILL_DEFS, baseSkillValue, createCharacter, normalizeCharacter, refreshDerived } from '../src/core/character.js';
 
 let passed = 0, failed = 0;
@@ -149,13 +151,18 @@ console.log('== AI 车卡技能点 ==');
 }
 
 // ---- 用例 7：职业不在职业表里时不凭空造职业点 ----
+//
+// 注意这里**不能**用 charFromAI 造卡：AI 车卡路径现在会把表外职业名
+// 纠正成表内职业（见用例 15），occTotal 自然不为 0。
+// 本用例保护的是 fillSkillPoints 自身的约束——无论职业查不查得到，
+// 它都不许凭空编出职业点来。所以直接构造一张职业名诡异的卡。
 {
-  const raw = {
-    name: '怪人', occupation: '赛博格', // 表里没有这个职业
-    attrs: { EDU: 60, INT: 70 },
-    skills: {}
-  };
-  const ch = gen(raw);
+  const ch = createCharacter({ name: '怪人', isPlayer: false });
+  ch.occupation = '赛博格'; // 表里没有这个职业，且不走 AI 纠正
+  ch.attrs.EDU = 60;
+  ch.attrs.INT = 70;
+  refreshDerived(ch);
+
   fillSkillPoints(ch);
   const b = budgetOf(ch);
 
@@ -277,6 +284,186 @@ console.log('== AI 车卡技能点 ==');
 
   ok(ch.skills['闪避'] <= 99, `闪避被夹到 99 以内（实际 ${ch.skills['闪避']}）`);
   ok(ch.skills['母语'] <= 99, `母语被夹到 99 以内（实际 ${ch.skills['母语']}）`);
+}
+
+// ---- 用例 15：AI 自创的表外职业名也要能算出职业点 ----
+//
+// 真实 bug：AI 常写「退伍军人」「赛博格」「电竞选手」这类名字。
+// findOccupation 查不到 → 职业点算成 0 → AI 加的战斗技能全变成兴趣点 →
+// 账目超支，技能页还提示「这个职业不在职业表里」。玩家看到的就是一张废卡。
+//
+// 修法分两层：常见的自创写法进别名表（职业名保留原样，人设味道不丢）；
+// 别名也没收录的，按「AI 把点加在哪」反推一个表内职业。
+{
+  const raw = {
+    name: '沈砚', occupation: '退伍军人',
+    attrs: { STR: 65, CON: 60, SIZ: 65, DEX: 55, APP: 50, INT: 60, POW: 65, EDU: 60, LUCK: 45 },
+    skills: { '格斗：斗殴': 60, '射击：手枪': 55, '闪避': 40, '母语': 70, '侦查': 45, '急救': 50 }
+  };
+  const ch = gen(raw);
+
+  ok(!!findOccupation(ch.occupation),
+    `自创职业名能被识别（实际「${ch.occupation}」）`);
+
+  // 关键：必须挑一个「战斗技能算本职」的职业，否则 AI 加的点全废
+  const b0 = budgetOf(ch);
+  ok(b0.occTotal > 0, '自创职业名也能算出职业点（不再是 0）');
+
+  fillSkillPoints(ch);
+  const b = budgetOf(ch);
+  ok(b.occLeft >= 0, '职业点不超支');
+  eq(b.occLeft, 0, '职业点能花完');
+  eq(b.intLeft, 0, '兴趣点也能花完');
+}
+
+// ---- 用例 15b：别名表完全没收录的怪名字，也要落到一个表内职业 ----
+{
+  const raw = {
+    name: '怪人', occupation: '赛博格',
+    attrs: { STR: 60, CON: 55, SIZ: 55, DEX: 65, APP: 50, INT: 60, POW: 55, EDU: 60, LUCK: 50 },
+    skills: { '格斗：斗殴': 70, '射击：手枪': 65 }
+  };
+  const ch = gen(raw);
+
+  ok(!!findOccupation(ch.occupation),
+    `怪名字被纠正成表内职业（实际「${ch.occupation}」）`);
+  ok(budgetOf(ch).occTotal > 0, '纠正后职业点不为 0');
+}
+
+// ---- 用例 16：能查到的职业名不许被改动 ----
+{
+  const raw = {
+    name: '白露', gender: '女', occupation: '记者',
+    attrs: { EDU: 70, INT: 60 }, skills: { '侦查': 50 }
+  };
+  const ch = gen(raw);
+  eq(ch.occupation, '记者', '标准职业名原样保留');
+  eq(ch.gender, '女', 'AI 给了性别就原样保留');
+}
+
+// ---- 用例 17：AI 漏掉性别时不能留空 ----
+{
+  const raw = {
+    name: '无名', occupation: '记者',
+    attrs: { EDU: 70, INT: 60 }, skills: {}
+  };
+  const ch = gen(raw);
+  ok(String(ch.gender || '').trim() !== '', '性别字段被兜底填上，不是空格子');
+}
+
+// ---- 用例 18：别名职业（护士长）要映射到标准职业，但职业点算得出来 ----
+{
+  const raw = {
+    name: '护工', occupation: '护士长',
+    attrs: { EDU: 60, INT: 60 }, skills: { '急救': 70 }
+  };
+  const ch = gen(raw);
+  ok(!!findOccupation(ch.occupation), `别名职业能查到（实际「${ch.occupation}」）`);
+  fillSkillPoints(ch);
+  const b = budgetOf(ch);
+  eq(b.occLeft, 0, '别名职业的卡职业点也能花完');
+  eq(b.intLeft, 0, '别名职业的卡兴趣点也能花完');
+}
+
+// ---- 用例 19：兴趣点要集中在少数技能上，不许撒胡椒面 ----
+//
+// 早期实现把兴趣点平均摊到 30 多项技能，每项加 3~4 点。
+// 这种卡实战里没有一项能过检定，玩家一看就知道分配坏了。
+{
+  const raw = {
+    name: '白露', occupation: '记者',
+    attrs: { STR: 45, CON: 50, SIZ: 45, DEX: 65, APP: 65, INT: 75, POW: 55, EDU: 70, LUCK: 60 },
+    skills: { '侦查': 60, '聆听': 55, '图书馆使用': 65, '话术': 40, '母语': 70, '心理学': 45 },
+    customNames: { '技艺①': '摄影' }
+  };
+  const ch = gen(raw);
+  fillSkillPoints(ch);
+
+  // 统计「兴趣点加到了多少项技能上」
+  const baseOf = (n) => {
+    const d = SKILL_DEFS.find((x) => x.name === n);
+    return d ? baseSkillValue(d, ch.attrs) : 0;
+  };
+  const isOcc = (n) => isOccupationalSkill(ch, n, (x) => (ch.customNames || {})[x] || '');
+  const intTouched = Object.entries(ch.skills)
+    .filter(([n, v]) => v - baseOf(n) > 0 && !isOcc(n));
+
+  ok(intTouched.length <= 12,
+    `兴趣点集中在少数技能上（实际 ${intTouched.length} 项，应 ≤ 12）`);
+
+  // 而且不能全砸在战斗技能上
+  const combat = ['格斗：斗殴', '射击：手枪'];
+  const combatPts = combat.reduce((s, n) => s + Math.max(0, (ch.skills[n] || 0) - baseOf(n)), 0);
+  ok(combatPts <= 20, `记者的兴趣点没被砸到战斗技能上（战斗共 ${combatPts} 点，应 ≤ 20）`);
+}
+
+// ---- 用例 20：带「任意特长」的职业也要把职业点花完 ----
+//
+// 152/225 个职业写着「任意特长可选 N 项」（occupations.js 的 free）。
+// 这些职业光靠 fixed 那几项本职技能，点数根本花不完——实测贵族剩 152 点、
+// 医生剩 25 点，账目永远平不了。修法是替 AI 选出那 N 项特长
+// （记在 ch.occFreeSkills 里），选中即算本职。
+{
+  const cases = [
+    ['贵族', { EDU: 85, INT: 70 }, { '法律': 70, '骑术': 65 }],
+    ['医生', { EDU: 90, INT: 80 }, { '医学': 80, '急救': 75, '心理学': 70 }],
+    ['医生（原作向）', { EDU: 80, INT: 75 }, { '医学': 75, '急救': 70 }]
+  ];
+  for (const [occ, attrs, skills] of cases) {
+    const ch = gen({ name: '特长测试', occupation: occ, attrs, skills });
+    fillSkillPoints(ch);
+    const b = budgetOf(ch);
+    eq(b.occLeft, 0, `${occ} 的职业点能花完（剩 ${b.occLeft}）`);
+    eq(b.intLeft, 0, `${occ} 的兴趣点能花完（剩 ${b.intLeft}）`);
+    ok((ch.occFreeSkills || []).length > 0, `${occ} 选出了任意特长`);
+  }
+}
+
+// ---- 用例 21：社交技能要按职业允许的项数分配，不能 4 项全填 ----
+//
+// 职业写「选 2 项社交技能」时，isOccupationalSkill 会把 4 项都判成本职
+// （程序不知道玩家选哪两项）。但分配时要是 4 项都填，每张卡都会长着
+// 「话术/取悦/恐吓/说服 全 60+」的脸，完全不像真人车的卡。
+{
+  const ch = gen({
+    name: '社交测试', occupation: '记者',
+    attrs: { EDU: 70, INT: 70, APP: 65 },
+    skills: {}
+  });
+  fillSkillPoints(ch);
+
+  const baseOf = (n) => {
+    const d = SKILL_DEFS.find((x) => x.name === n);
+    return d ? baseSkillValue(d, ch.attrs) : 0;
+  };
+  const raised = SOCIAL_SKILLS.filter((s) => (ch.skills[s] || 0) - baseOf(s) > 0);
+  const quota = findOccupation(ch.occupation).social || 0;
+
+  ok(raised.length <= quota,
+    `社交技能只填了 ${raised.length} 项（职业允许 ${quota} 项）`);
+}
+
+// ---- 用例 22：randomCharacter 造出来的卡账目必须是平的 ----
+//
+// 早期实现按 EDU*4 硬编码撒点、完全不看职业，结果一张没填职业的卡
+// 兴趣点能用掉 220 点（预算只有 INT×2=90），账目红成一片。
+// 而且它连职业和性别都留空。
+{
+  for (let i = 0; i < 30; i++) {
+    const ch = randomCharacter({ name: `随机${i}`, isPlayer: true });
+    const b = budgetOf(ch);
+
+    ok(String(ch.occupation || '').trim() !== '', `随机卡 #${i} 有职业`);
+    ok(!!findOccupation(ch.occupation), `随机卡 #${i} 的职业在表里（${ch.occupation}）`);
+    ok(String(ch.gender || '').trim() !== '', `随机卡 #${i} 有性别`);
+
+    eq(b.occLeft, 0, `随机卡 #${i} 职业点刚好花完（剩 ${b.occLeft}）`);
+    eq(b.intLeft, 0, `随机卡 #${i} 兴趣点刚好花完（剩 ${b.intLeft}）`);
+
+    // 产品约定：随机卡的闪避恒等于 DEX/2
+    eq(ch.skills['闪避'], Math.floor(ch.attrs.DEX / 2),
+      `随机卡 #${i} 的闪避 = DEX/2`);
+  }
 }
 
 // ---- 收尾 ----

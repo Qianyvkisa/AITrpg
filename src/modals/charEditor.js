@@ -217,6 +217,23 @@ function openCharEditorImpl(ch, opts = {}) {
 
     const over = b.occLeft < 0 || b.intLeft < 0;
     const cls = over ? 'sk-budget over' : 'sk-budget';
+
+    // 「任意特长」说明
+    //
+    // 152/225 个职业带「任意特长可选 N 项」。这些职业光靠固定本职技能
+    // 点数花不完，得挑几项特长补上。这里把已选的显示出来，玩家才知道
+    // 为什么某些技能被算成本职——否则会以为程序乱标。
+    const freeCount = Number(b.occupation.free) || 0;
+    const freePicked = Array.isArray(work.occFreeSkills) ? work.occFreeSkills : [];
+    const freeLine = freeCount > 0
+      ? `<div class="sk-budget-free">
+          任意特长 ${freePicked.length}/${freeCount}：
+          ${freePicked.length
+            ? freePicked.map((n) => `<b>${escapeHtml(n)}</b>`).join('、')
+            : '<em>还没选，剩余职业点会花不完</em>'}
+         </div>`
+      : '';
+
     return `
       <div class="${cls}" data-budget="occ">
         <div class="sk-budget-item" data-budget-occ>
@@ -230,6 +247,7 @@ function openCharEditorImpl(ch, opts = {}) {
           <em>剩 ${b.intLeft}</em>
         </div>
         <div class="sk-budget-occ">${escapeHtml(b.occupation.name)}（${escapeHtml(b.occupation.credit)}）· ${escapeHtml(b.occupation.pts)}</div>
+        ${freeLine}
       </div>`;
   };
 
@@ -257,9 +275,22 @@ function openCharEditorImpl(ch, opts = {}) {
         </div>`;
       }
 
+      // 任意特长的标记：职业还剩特长名额时，技能名可点，点一下加入/移出。
+      //
+      // 已经选中的特长也要显示开关（否则选完就再也取消不了）。
+      // 所以条件是「有 free 名额」且「不是 fixed 等硬本职」，而不是 !occ。
+      const freeCount = Number(budget().occupation?.free) || 0;
+      const isFree = Array.isArray(work.occFreeSkills) && work.occFreeSkills.includes(def.name);
+      const hardOcc = freeCount > 0 && occ && !isFree;   // 靠 fixed/社交/★ 判进来的本职
+      const freeTag = freeCount > 0 && !hardOcc
+        ? `<button type="button" class="sk-free ${isFree ? 'is-on' : ''}"
+             data-free="${escapeHtml(def.name)}"
+             title="${isFree ? '取消「任意特长」，这点改走兴趣点' : '设为「任意特长」，这点改走职业点'}">特长</button>`
+        : '';
+
       return `
         <div class="ce-skill-row ${occ ? 'is-occ' : ''}" data-skillrow="${escapeHtml(def.name)}">
-          <span class="sk-name">${escapeHtml(def.name)}</span>
+          <span class="sk-name">${escapeHtml(def.name)}${freeTag}</span>
           ${customName}
           <div class="sk-stepper">
             <button type="button" class="sk-step" data-step-down="${escapeHtml(def.name)}" aria-label="减少">−</button>
@@ -649,6 +680,33 @@ function openCharEditorImpl(ch, opts = {}) {
           work.occupation = btn.dataset.suggest;
           const occInput = backdrop.querySelector('#fOcc');
           if (occInput) occInput.value = work.occupation;
+          renderTab();
+        };
+      });
+
+      // 「特长」标记：把这技能加进 / 移出「任意特长」名单。
+      //
+      // 职业写着「任意特长可选 N 项」时（152/225 个职业都有），
+      // 光靠固定本职技能点数花不完。玩家点这个按钮就能指定哪几项算特长，
+      // 加进去的技能，点数从职业点出；移出来就改走兴趣点。
+      backdrop.querySelectorAll('[data-free]').forEach((btn) => {
+        btn.onclick = () => {
+          const name = btn.dataset.free;
+          if (!Array.isArray(work.occFreeSkills)) work.occFreeSkills = [];
+
+          const idx = work.occFreeSkills.indexOf(name);
+          if (idx >= 0) {
+            work.occFreeSkills.splice(idx, 1);
+          } else {
+            // 名额上限：职业写了 free: N，最多选 N 项
+            const limit = Number(budget().occupation?.free) || 0;
+            if (limit > 0 && work.occFreeSkills.length >= limit) {
+              // 满了就提示，而不是悄悄把别的一项踢掉
+              btn.title = `最多只能选 ${limit} 项，先取消一个`;
+              return;
+            }
+            work.occFreeSkills.push(name);
+          }
           renderTab();
         };
       });
