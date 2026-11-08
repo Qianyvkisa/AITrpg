@@ -2,16 +2,15 @@
 // 角色卡编辑器：对齐《COC7空白卡23（粉）-坪改.xlsx》的分区
 //
 // 标签页：基本信息 / 属性 / 技能 / 状态与资产 / 背景 / 装备与经历
-// 支持手动填写、随机骰点、AI 一键生成。
+// 支持手动填写与 AI 一键生成。
 // ---------------------------------------------------------------------------
 import { openModal } from './shell.js';
 import {
-  ATTRS, SKILL_DEFS, baseSkillValue, refreshDerived, rollAttributes, skillLevels,
+  ATTRS, SKILL_DEFS, baseSkillValue, refreshDerived, skillLevels,
   normalizeCharacter
 } from '../core/character.js';
 import { isOccupationalSkill, skillPointBudget, suggestOccupations } from '../core/occupations.js';
 import { escapeHtml } from '../shared/text.js';
-import { randomCharacter } from '../services/charGen.js';
 
 /** 属性对应的评价文字（与 Excel 的 AU 列一致） */
 const ATTR_HINTS = {
@@ -95,8 +94,6 @@ function openCharEditorImpl(ch, opts = {}) {
       <div class="modal-head">
         <h2>${escapeHtml(title)}</h2>
         <div class="ce-head-actions">
-          <button class="btn ghost sm" id="btnRollAttrs">随机属性</button>
-          <button class="btn ghost sm" id="btnRandomAll">随机整卡</button>
           ${allowAIGen ? '<button class="btn ghost sm ai" id="btnAIGen">AI 生成</button>' : ''}
           <button class="icon-btn" data-close>×</button>
         </div>
@@ -751,31 +748,17 @@ function openCharEditorImpl(ch, opts = {}) {
 
   // -------------------------------------------------------------------------
   // 顶部快捷操作
+  //
+  // 这里只保留「AI 生成」。
+  //
+  // 之前还挂着「随机属性」和「随机整卡」两个按钮，但它们和 AI 生成高度重复：
+  // 三者都是「一键把整张卡（或属性）填满」，玩家面对三个按钮根本分不清该点哪个。
+  // 而且随机整卡走的是本地 rollAttributes，出来的是纯随机数据，没有职业画像，
+  // 实战价值明显不如 AI 生成。现在统一收口到一个入口。
+  //
+  // 随机能力并没有删掉：gameSetup 里「随机队友」仍然调用 randomCharacter，
+  // 只是角色卡编辑器里不再暴露这个按钮。
   // -------------------------------------------------------------------------
-  backdrop.querySelector('#btnRollAttrs').onclick = () => {
-    collect();
-    work.attrs = rollAttributes();
-    refreshDerived(work);
-    work.hp.current = work.hp.max;
-    work.mp.current = work.mp.max;
-    work.san.current = work.san.temp;
-    work.luck.current = work.attrs.LUCK;
-    // 骰完属性跳到属性页，让用户马上看到
-    activeTab = 'attrs';
-    renderTab();
-  };
-
-  backdrop.querySelector('#btnRandomAll').onclick = () => {
-    const fresh = randomCharacter({
-      name: work.name || '调查员',
-      isPlayer: work.isPlayer,
-      occupation: work.occupation
-    });
-    Object.assign(work, fresh);
-    activeTab = 'basic';
-    renderTab();
-  };
-
   if (allowAIGen) {
     const aiBtn = backdrop.querySelector('#btnAIGen');
     if (aiBtn) {

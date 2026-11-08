@@ -15,7 +15,7 @@
 
 import { charFromAI, fillSkillPoints, randomCharacter } from '../src/services/charGen.js';
 import {
-  skillPointBudget, isOccupationalSkill, findOccupation, SOCIAL_SKILLS
+  skillPointBudget, isOccupationalSkill, findOccupation, SOCIAL_SKILLS, OCCUPATIONS
 } from '../src/core/occupations.js';
 import { SKILL_DEFS, baseSkillValue, createCharacter, normalizeCharacter, refreshDerived } from '../src/core/character.js';
 
@@ -464,6 +464,117 @@ console.log('== AI 车卡技能点 ==');
     eq(ch.skills['闪避'], Math.floor(ch.attrs.DEX / 2),
       `随机卡 #${i} 的闪避 = DEX/2`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// v0.2.0 回归：特长标记与技能点账目不能串账
+//
+// 真实 bug：老逻辑是「先分点、后选任意特长」。
+// 分点时那些技能按「兴趣点」记账，等后来被标成本职，账目整体挪到职业点
+// 名下 —— 于是职业点凭空超支、兴趣点凭空剩出，两边数额恰好互为相反数。
+// 实测 225 个职业里 9 个中招，最惨的「业余艺术爱好者」是 occ -135 / int +135，
+// 玩家看到的就是「职业点红了、兴趣点还剩一大堆」，怎么调都调不平。
+// ---------------------------------------------------------------------------
+console.log('\n== v0.2.0 回归：特长与账目不能串账 ==');
+
+{
+  // 贵族：EDU*2+MAX(EDU*2,APP*2) 预算 340，free=3，fixed 只有法律/骑术。
+  // 这是原先串账最典型的职业之一。
+  const ch = charFromAI({
+    name: '贵族甲', occupation: '贵族',
+    attrs: { STR: 45, CON: 45, SIZ: 50, DEX: 55, APP: 70, INT: 75, POW: 60, EDU: 85, LUCK: 55 },
+    skills: { '话术': 50, '说服': 45 }
+  }, {});
+  fillSkillPoints(ch);
+  const b = budgetOf(ch);
+
+  eq(b.occLeft, 0, '贵族：职业点不超支也不剩余');
+  eq(b.intLeft, 0, '贵族：兴趣点不超支也不剩余');
+
+  // 特长名额不能被突破
+  const occ = findOccupation(ch.occupation);
+  ok((ch.occFreeSkills || []).length <= (Number(occ?.free) || 0),
+    `贵族：特长数量不超过名额（${(ch.occFreeSkills || []).length}/${occ?.free}）`);
+}
+
+{
+  // 全职业扫一遍：既不能超支，也不能出现串账。
+  //
+  // 职业点剩一点点是规则允许的（比如 free 名额用满、固定本职全到 99），
+  // 但绝不能出现「职业点负、兴趣点正」这种串账。
+  const ATTRS_FIX = { STR: 50, CON: 55, SIZ: 60, DEX: 65, APP: 55, INT: 70, POW: 60, EDU: 75, LUCK: 50 };
+  let overCount = 0;
+  let crossCount = 0;
+  const bad = [];
+
+  for (const occ of OCCUPATIONS) {
+    const ch = charFromAI({
+      name: '测试', occupation: occ.name, attrs: { ...ATTRS_FIX },
+      skills: { '侦查': 55, '聆听': 50, '图书馆使用': 60, '心理学': 45 }
+    }, {});
+    fillSkillPoints(ch);
+    const b = budgetOf(ch);
+
+    if (b.occLeft < 0 || b.intLeft < 0) {
+      overCount++;
+      bad.push(`${ch.occupation}: 超支 occ ${b.occLeft} int ${b.intLeft}`);
+    }
+    // 串账：一边负数、另一边正数
+    if ((b.occLeft < 0 && b.intLeft > 0) || (b.intLeft < 0 && b.occLeft > 0)) {
+      crossCount++;
+      bad.push(`${ch.occupation}: 串账 occ ${b.occLeft} int ${b.intLeft}`);
+    }
+  }
+
+  eq(overCount, 0, '全职业：没有任何职业出现点数超支');
+  eq(crossCount, 0, '全职业：没有任何职业出现职业点/兴趣点串账');
+  if (bad.length) console.log('    问题：' + bad.slice(0, 5).join(' | '));
+}
+
+{
+  // AI 给出低于初始值的技能，不能把初始值顶掉。
+  //
+  // 真实 bug：AI 写「急救: -20」，老逻辑夹到 0，于是急救从初始值 30 变成 0，
+  // 凭空扣掉 30 点预算；skillPointBudget 只累加 spent > 0 的部分，
+  // 那 30 点既不算已用也分不出去，账目永远差 30。
+  const ch = charFromAI({
+    name: '阿丁', occupation: '医生',
+    attrs: { STR: 50, CON: 55, SIZ: 60, DEX: 65, APP: 55, INT: 70, POW: 60, EDU: 75, LUCK: 50 },
+    skills: { '急救': -20, '医学': 999, '闪避': 1, '母语': 0 }
+  }, {});
+
+  ok(ch.skills['急救'] >= 30, `急救不能低于初始值 30（实际 ${ch.skills['急救']}）`);
+  eq(ch.skills['医学'], 99, '医学超过 99 被夹到 99');
+  ok(ch.skills['闪避'] >= Math.floor(ch.attrs.DEX / 2),
+    `闪避不能低于 DEX/2（实际 ${ch.skills['闪避']}）`);
+  ok(ch.skills['母语'] >= ch.attrs.EDU,
+    `母语不能低于 EDU（实际 ${ch.skills['母语']}）`);
+
+  fillSkillPoints(ch);
+  const b = budgetOf(ch);
+  eq(b.occLeft, 0, '医生（含非法输入）：职业点补平');
+  eq(b.intLeft, 0, '医生（含非法输入）：兴趣点补平');
+}
+
+{
+  // 换职业后，旧职业残留的特长标记必须被清掉，
+  // 否则那些技能会一直白吃新职业的职业点，把账目算歪。
+  const ch = charFromAI({
+    name: '换职业', occupation: '贵族',
+    attrs: { STR: 50, CON: 55, SIZ: 60, DEX: 65, APP: 55, INT: 70, POW: 60, EDU: 75, LUCK: 50 },
+    skills: {}
+  }, {});
+  fillSkillPoints(ch);
+  ok((ch.occFreeSkills || []).length > 0, '前提：贵族确实选出了特长');
+
+  // 换成没有 free 名额的职业（记者 free=undefined，只有 social 名额）
+  ch.occupation = '记者';
+  fillSkillPoints(ch);
+  eq((ch.occFreeSkills || []).length, 0, '换到无特长名额的职业后，残留标记被清空');
+
+  const b = budgetOf(ch);
+  eq(b.occLeft, 0, '换职业后职业点仍然补平');
+  eq(b.intLeft, 0, '换职业后兴趣点仍然补平');
 }
 
 // ---- 收尾 ----

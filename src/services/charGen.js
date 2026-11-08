@@ -9,7 +9,7 @@ import {
 } from '../core/character.js';
 import {
   OCCUPATIONS, SOCIAL_SKILLS, findOccupation, suggestOccupations,
-  isOccupationalSkill, skillPointBudget
+  isOccupationalSkill, skillPointBudget, occupationTotal
 } from '../core/occupations.js';
 
 /** 生成角色卡时的输出上限。一张完整卡（含技能与背景）约 1200-2000 token */
@@ -402,6 +402,10 @@ export function charFromAI(raw, { name, isPlayer = false, existingNames = [] } =
   if (Number.isFinite(age) && age >= 15 && age <= 90) ch.age = Math.floor(age);
 
   // ---- 属性：夹到合法范围，并归整到 5 的倍数 ----
+  //
+  // 顺序：先归整到 5 的倍数，再夹到 [1, 99]。
+  // COC 7e 的属性上限就是 99（人类极限），所以 999 这种越界值最终落到 99；
+  // 正常范围（15~90，来自 3d6×5）内的值会被归整成 5 的倍数。
   if (raw.attrs && typeof raw.attrs === 'object') {
     for (const a of ATTRS) {
       const v = Number(raw.attrs[a.key] ?? raw.attrs[a.name]);
@@ -428,16 +432,30 @@ export function charFromAI(raw, { name, isPlayer = false, existingNames = [] } =
   refreshDerived(ch);
 
   // ---- 技能：以初始值为底，覆盖 AI 给的值 ----
+  //
+  // 关键约束：技能值**绝不能低于初始值**。
+  //
+  // 真实 bug：AI 偶尔会给出低于初始值的数字（急救写 -20、闪避写 5）。
+  // 早期实现只是 Math.max(0, ...) 夹到 0，于是「急救」从初始值 30 变成 0，
+  // 等于凭空扣掉 30 点。而 skillPointBudget 算的是「当前值 − 初始值」，
+  // 负数那部分不参与累加（spent <= 0 被跳过），结果就是这 30 点预算
+  // 既没被记成已用、也没法再分配出去，账面上永远差 30 点补不平。
+  //
+  // 现在的做法：以该技能的初始值为下限。AI 给低了就当它没加，
+  // 保持初始值；给高了才采纳。
   const validNames = new Set(SKILL_DEFS.map((d) => d.name));
   if (raw.skills && typeof raw.skills === 'object') {
     for (const [k, v] of Object.entries(raw.skills)) {
       const key = String(k).trim();
+      if (!validNames.has(key)) continue;   // AI 瞎编的技能名直接丢掉
       const n = Number(v);
       if (!Number.isFinite(n)) continue;
-      if (validNames.has(key)) {
-        // 克苏鲁神话不能高于 99，其他夹到 99
-        ch.skills[key] = Math.max(0, Math.min(99, Math.round(n)));
-      }
+      const def = SKILL_DEFS.find((d) => d.name === key);
+      if (!def) continue;
+
+      const base = baseSkillValue(def, ch.attrs);
+      // 低于初始值的一律按初始值算，高于的夹到 99
+      ch.skills[key] = Math.max(base, Math.min(99, Math.round(n)));
     }
   }
   // 闪避/母语由属性决定初始值，但 AI 可以在此基础上加点（这属于正常花点，
@@ -610,6 +628,82 @@ export function fillSkillPoints(ch, opts = {}) {
     return budgetNow;
   };
 
+  // -------------------------------------------------------------------------
+  // 阶段 0：先定「任意特长」，再算账、再分点
+  //
+  // 这是 v0.2.0 修的核心 bug。原来的顺序是：
+  //   1) 算账 → 用职业点抬 fixed 里的本职技能
+  //   2) 用兴趣点抬非本职技能（此时兴趣点已全部花光）
+  //   3) 发现职业点还有剩余，才去挑「任意特长」，把已加过点的技能
+  //      重新标记成本职
+  //
+  // 第 3 步是致命伤：那些技能的点数本来是按「兴趣点」记的账，一旦被标成
+  // 本职，账目就整体挪到职业点名下——于是职业点凭空超支、兴趣点凭空剩出，
+  // 而且两边数额恰好互为相反数。实测 225 个职业里有 9 个中招：
+  //   贵族           occ -115 / int +115
+  //   业余艺术爱好者   occ -135 / int +135
+  //   医生（原作向）   occ  -65 / int  +65
+  //   ……
+  // 玩家看到的就是「职业点红了、兴趣点还剩一大堆」，怎么调都调不平。
+  //
+  // 正确顺序：**先把特长定下来**，让本职范围在算账之前就固定，
+  // 之后职业点和兴趣点各记各的账，永远不会串。
+  // -------------------------------------------------------------------------
+  const occDef = findOccupation(ch.occupation);
+  const freeCount = Number(occDef?.free) || 0;
+
+  // 「任意特长」的候选：还没被算作本职、且不是排除项的技能。
+  //
+  // 排序原则：
+  //   0) AI 已经加过点的 —— 它本来就想让这角色会这项
+  //   1) 跑团常用技能 —— 侦查/聆听/图书馆这类，加了不亏
+  //   2) 其余
+  // 空的自定义槽（射击①这种没填名字的）跳过：选了也不知道是什么。
+  const FREE_PREFER = [
+    '侦查', '聆听', '图书馆使用', '心理学', '潜行', '急救',
+    '话术', '说服', '估价', '乔装', '妙手', '攀爬', '游泳',
+    '汽车驾驶', '历史', '神秘学', '计算机使用', '机械维修'
+  ];
+
+  if (freeCount > 0) {
+    const alreadyPicked = Array.isArray(ch.occFreeSkills) ? ch.occFreeSkills.slice() : [];
+    const alreadySet = new Set(alreadyPicked);
+
+    // 还需要补几个名额
+    const need = Math.max(0, freeCount - alreadyPicked.length);
+
+    if (need > 0) {
+      const freePool = SKILL_DEFS
+        .filter((d) => !EXCLUDED.has(d.name))
+        .filter((d) => !isOcc(d.name))          // 已经是本职的不用再选
+        .filter((d) => !alreadySet.has(d.name))
+        .filter((d) => !d.custom || displayOf(d.name))   // 空的自定义槽跳过
+        .map((d) => {
+          const cur = Number(ch.skills[d.name] ?? baseOf(d.name)) || 0;
+          const touched = cur > baseOf(d.name);
+          const preferIdx = FREE_PREFER.indexOf(d.name);
+          let rank = 3;
+          if (touched) rank = 0;
+          else if (preferIdx >= 0) rank = 1;
+          return { name: d.name, cur, rank, preferIdx };
+        })
+        .sort((a, b) => a.rank - b.rank || b.cur - a.cur || a.preferIdx - b.preferIdx);
+
+      const picked = freePool.slice(0, need).map((x) => x.name);
+      ch.occFreeSkills = [...alreadyPicked, ...picked];
+    } else if (alreadyPicked.length > freeCount) {
+      // 名额被改小了（比如玩家换了个 free 更少的职业），截断到当前名额
+      ch.occFreeSkills = alreadyPicked.slice(0, freeCount);
+    }
+  } else if (Array.isArray(ch.occFreeSkills) && ch.occFreeSkills.length) {
+    // 当前职业没有「任意特长」名额，残留的标记要清掉，
+    // 否则那些技能会一直白吃职业点，把账目算歪
+    ch.occFreeSkills = [];
+  }
+
+  // 特长定完后，本职范围就固定了。下面所有 isOcc() 判断都以这个为准，
+  // 中途不会再改 ch.occFreeSkills，账目自然不会再串。
+
   let budget = skillPointBudget(ch, baseOf, isOcc);
   if (budget.occLeft < 0 || budget.intLeft < 0) {
     budget = trimOverflow(budget);
@@ -641,7 +735,7 @@ export function fillSkillPoints(ch, opts = {}) {
   const spread = (candidates, points, cap = 90) => {
     let left = points;
     let guard = 0;
-    while (left > 0 && guard < 2000) {
+    while (left > 0 && guard < 4000) {
       guard++;
       let progressed = false;
       for (const c of candidates) {
@@ -700,7 +794,6 @@ export function fillSkillPoints(ch, opts = {}) {
   // 到底选哪两项，只能都算候选）。但**分配点数时不能 4 项都填**——
   // 实测那样会让每张卡都长着「话术/取悦/恐吓/说服 60+」的脸，
   // 完全不像真人车出来的卡。这里按 social 数量截断。
-  const occDef = findOccupation(ch.occupation);
   const socialQuota = Number(occDef?.social) || 0;
 
   const socialRanked = socialQuota > 0
@@ -737,59 +830,26 @@ export function fillSkillPoints(ch, opts = {}) {
 
   occLeft = spreadConcentrated(occCandidates, occLeft);
 
-  // ---- 1b) 职业点还没花完：说明这个职业带「任意特长」，得先选几项 ----
+  // ---- 1b) 职业点仍没花完：把已有特长名额扩到上限 ----
   //
-  // 152/225 个职业写着「任意特长可选 N 项」（occupations.js 的 free）。
-  // 光靠 fixed 里那几项本职技能，职业点根本花不完——实测贵族剩 152 点、
-  // 医生剩 25 点，账目永远平不了，技能页还红着。
+  // 正常情况下阶段 0 已经把名额用满了。这里兜的是另一种情况：
+  // 职业给的名额本来就少（free=1），而固定本职技能又顶到了 99，
+  // 职业点确实没处花。这时不再新增特长（名额就是规则上限，不能破），
+  // 而是把这笔余额记下来交给后面的兴趣点阶段——
+  // 但兴趣点有自己的预算，不能挪用，所以这里只保证不超支。
   //
-  // 原版规则里这 N 项由玩家自选，选中即算本职。这里替 AI 选：
-  // 优先挑 AI 已经加过点的技能（说明它本来就想要这项），
-  // 再挑跑团常用技能，最后才轮到其余技能。
+  // 换句话说：职业点花不完是可以接受的（真人车卡也常有余额），
+  // 真正不能接受的是**串账**（职业点红了、兴趣点剩着），那才是 bug。
   if (occLeft > 0) {
-    const occ = findOccupation(ch.occupation);
-    const freeCount = Number(occ?.free) || 0;
+    const moreCandidates = SKILL_DEFS
+      .filter((d) => !EXCLUDED.has(d.name) && isOcc(d.name))
+      .map((d) => {
+        const cur = Number(ch.skills[d.name] ?? baseOf(d.name)) || 0;
+        return { name: d.name, cur };
+      })
+      .sort((a, b) => b.cur - a.cur);
 
-    if (freeCount > 0) {
-      const alreadyPicked = new Set(Array.isArray(ch.occFreeSkills) ? ch.occFreeSkills : []);
-      const FREE_PREFER = [
-        '侦查', '聆听', '图书馆使用', '心理学', '潜行', '急救',
-        '话术', '说服', '估价', '乔装', '妙手', '攀爬', '游泳',
-        '汽车驾驶', '历史', '神秘学', '计算机使用', '机械维修'
-      ];
-
-      // 候选：还没被算作本职、且不是排除项的技能
-      const freePool = SKILL_DEFS
-        .filter((d) => !EXCLUDED.has(d.name))
-        .filter((d) => !isOcc(d.name))
-        // 空的自定义槽没有名字，选了也不知道是什么，跳过
-        .filter((d) => !d.custom || displayOf(d.name))
-        .map((d) => {
-          const cur = Number(ch.skills[d.name] ?? baseOf(d.name)) || 0;
-          const touched = cur > baseOf(d.name);
-          const preferIdx = FREE_PREFER.indexOf(d.name);
-          let rank = 3;
-          if (touched) rank = 0;                       // AI 已经加过点的
-          else if (preferIdx >= 0) rank = 1;           // 常用技能
-          return { name: d.name, cur, rank, preferIdx };
-        })
-        .sort((a, b) => a.rank - b.rank || b.cur - a.cur || a.preferIdx - b.preferIdx);
-
-      // 先按「需要几项」挑出前 N 项，剩下的余额再按需扩
-      const picked = freePool.slice(0, Math.max(freeCount, 1)).map((x) => x.name);
-      ch.occFreeSkills = [...alreadyPicked, ...picked.filter((n) => !alreadyPicked.has(n))];
-
-      // 选完特长后本职范围变大，重算候选再分一轮
-      const moreCandidates = SKILL_DEFS
-        .filter((d) => !EXCLUDED.has(d.name) && isOcc(d.name))
-        .map((d) => {
-          const cur = Number(ch.skills[d.name] ?? baseOf(d.name)) || 0;
-          return { name: d.name, cur };
-        })
-        .sort((a, b) => b.cur - a.cur);
-
-      occLeft = spreadConcentrated(moreCandidates, occLeft);
-    }
+    occLeft = spreadConcentrated(moreCandidates, occLeft);
   }
 
   // ---- 2) 兴趣点：先抬 AI 已经碰过的非本职技能 ----
