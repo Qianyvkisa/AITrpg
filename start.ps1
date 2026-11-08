@@ -1,4 +1,4 @@
-# 启动 COC 跑团桌面应用（开发模式，直接用源码目录跑 Electron）
+﻿# 启动 COC 跑团桌面应用（开发模式，直接用源码目录跑 Electron）
 
 # 关键：必须隔离父进程的 ELECTRON_RUN_AS_NODE 环境变量。
 # 该变量会让 electron.exe 退化成纯 Node 解释器，不创建窗口，
