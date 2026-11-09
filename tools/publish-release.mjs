@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// 创建 v0.2.1 GitHub Release 并上传 exe
+// 创建 v0.2.2 GitHub Release 并上传 exe
 //
 // 为什么用 Node 而不是 PowerShell：
 //   1) 正文含大量中文，PowerShell 5.1 转请求体时按本地代码页处理会丢中文；
@@ -15,8 +15,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO = 'Qianyvkisa/AITrpg';
-const TAG = 'v0.2.1';
-const EXE = join(root, 'COC-Keeper-v0.2.1-win-x64-portable.exe');
+const TAG = 'v0.2.2';
+const EXE = join(root, 'COC-Keeper-v0.2.2-win-x64-portable.exe');
 const BODY_FILE = join(root, 'tools', 'ui', 'shots', 'release-body.json');
 
 const token = process.env.GH_TOKEN;
@@ -65,7 +65,7 @@ console.log(`上传 ${EXE}（${(size / 1024 / 1024).toFixed(1)} MB）…`);
 
 // 已存在同名资产则先删掉，避免重复
 for (const a of release.assets || []) {
-  if (a.name === 'COC-Keeper-v0.2.1-win-x64-portable.exe') {
+  if (a.name === 'COC-Keeper-v0.2.2-win-x64-portable.exe') {
     await fetch(`https://api.github.com/repos/${REPO}/releases/assets/${a.id}`, {
       method: 'DELETE', headers: H
     });
@@ -73,7 +73,7 @@ for (const a of release.assets || []) {
   }
 }
 
-const uploadUrl = `https://uploads.github.com/repos/${REPO}/releases/${release.id}/assets?name=${encodeURIComponent('COC-Keeper-v0.2.1-win-x64-portable.exe')}`;
+const uploadUrl = `https://uploads.github.com/repos/${REPO}/releases/${release.id}/assets?name=${encodeURIComponent('COC-Keeper-v0.2.2-win-x64-portable.exe')}`;
 
 const data = readFileSync(EXE);
 const up = await fetch(uploadUrl, {
