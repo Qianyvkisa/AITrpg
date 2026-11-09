@@ -661,6 +661,133 @@ console.log('\n== v0.2.1 回归：职业点不能留闲置预算 ==');
   }
 }
 
+// ---- 用例：AI 大面积铺点时必须削得干净（v0.2.2 修）----
+//
+// 真实 bug：AI 有时不听「集中在少数几项」的劝，给几十项技能各加几十点。
+// 兴趣点预算只有 INT×2（约 140），却能超支 4000+ 点。
+//
+// 旧实现（v0.2.1 及之前）的 trimOverflow 是「每轮削 1 点、最多 2000 轮」，
+// 超支超过 2000 点时循环被 guard 强行截断，剩下的超支原样留在卡上：
+//   实测 会计师 + 全技能90 → 兴趣点剩 -2148
+// 玩家在编辑器里看到红字，怎么调都平不了。
+//
+// 修法：改成一次性批量削（算出该侧总超支，直接从技能上扣掉），
+// 并且从「加点最少」的开始削，保住少数高值技能。
+{
+  const allAt = (v) => {
+    const s = {};
+    for (const d of SKILL_DEFS) {
+      if (d.name === '克苏鲁神话') continue;   // 车卡阶段恒为 0
+      s[d.name] = d.custom ? Math.min(v, 60) : v;
+    }
+    return s;
+  };
+
+  // 挑几个 free 少 / 本职技能少的职业，最容易撞上 guard 上限
+  const occs = ['会计师', '杂技演员', '动物训练师', '酒保', '神职人员', '管家、男仆、女仆'];
+
+  for (const fill of [90, 99]) {
+    for (const occName of occs) {
+      const ch = gen({
+        name: '测试', occupation: occName, age: 30, gender: '男',
+        attrs: { STR: 50, CON: 55, SIZ: 60, DEX: 65, APP: 45, INT: 70, POW: 60, EDU: 90 },
+        skills: allAt(fill),
+        customNames: { '技艺①': '摄影', '外语①': '拉丁语', '科学①': '化学' }
+      });
+
+      const before = budgetOf(ch);
+      ok(before.intLeft < -2000, `前提：${occName} 全技能${fill} 时兴趣点确实超支 2000 点以上（实际 ${before.intLeft}）`);
+
+      fillSkillPoints(ch);
+      const after = budgetOf(ch);
+      eq(after.occLeft, 0, `${occName} 全技能${fill}：超支削干净后职业点刚好花完`);
+      eq(after.intLeft, 0, `${occName} 全技能${fill}：超支削干净后兴趣点刚好花完`);
+    }
+  }
+}
+
+// ---- 用例：信用评级 / 克苏鲁神话这类「不参与补点」的技能，超支时也要能削 ----
+//
+// 真实 bug：trimOverflow 里跳过了 EXCLUDED（信用评级/克苏鲁神话/自定义技能），
+// 但 skillPointBudget 算账时是照单全收的——AI 给信用评级写 99，那 99 点
+// 就实打实记在非本职账上。跳过后这些技能永远削不掉，账目永远差一截
+// （实测兴趣点剩 -58，怎么都平不了）。
+{
+  const ch = gen({
+    name: '测试', occupation: '会计师', age: 30,
+    attrs: { STR: 50, CON: 55, SIZ: 60, DEX: 65, APP: 45, INT: 70, POW: 60, EDU: 90 },
+    skills: { '信用评级': 99, '会计': 90, '法律': 90 },
+    customNames: {}
+  });
+  fillSkillPoints(ch);
+  const b = budgetOf(ch);
+  eq(b.occLeft, 0, '信用评级堆到 99 时职业点仍能花完');
+  eq(b.intLeft, 0, '信用评级堆到 99 时兴趣点仍能花完');
+  ok(b.intUsed <= b.intTotal, '信用评级算进兴趣账，但不许超支');
+}
+
+// ---- 用例：全 225 个职业 × 大面积铺点，账目一律要平 ----
+//
+// 这是上面几条的兜底：只要有一个职业削不干净，就说明批量削减逻辑还有漏洞。
+{
+  let bad = 0;
+  const badNames = [];
+  for (const occ of OCCUPATIONS) {
+    const ch = gen({
+      name: '测试', occupation: occ.name, age: 30, gender: '男',
+      attrs: { STR: 50, CON: 55, SIZ: 60, DEX: 65, APP: 45, INT: 70, POW: 60, EDU: 90 },
+      skills: (() => {
+        const s = {};
+        for (const d of SKILL_DEFS) {
+          if (d.name === '克苏鲁神话') continue;
+          s[d.name] = d.custom ? 60 : 90;
+        }
+        return s;
+      })(),
+      customNames: { '技艺①': '摄影', '外语①': '拉丁语', '科学①': '化学' }
+    });
+    fillSkillPoints(ch);
+    const b = budgetOf(ch);
+    if (b.occLeft !== 0 || b.intLeft !== 0) {
+      bad++;
+      if (badNames.length < 5) badNames.push(`${occ.name}(职业${b.occLeft}/兴趣${b.intLeft})`);
+    }
+  }
+  eq(bad, 0, `225 个职业大面积铺点后账目全平${bad ? '，不平的：' + badNames.join(' ') : ''}`);
+}
+
+// ---- 用例：AI 生成的卡在编辑器里打开后，特长名额必须已用满 ----
+//
+// 用户反馈「AI 生成任务卡不会自己点特长，所以还是会有职业点和兴趣点剩余」。
+// fillSkillPoints 阶段 0 会自动补满特长名额（free），这里锁住这个行为：
+// 只要职业带 free 名额，生成完就必须正好选满 free 项。
+{
+  let missing = 0;
+  const missingNames = [];
+  // 注意：职业表里有重名条目（工匠/艺人/科学家 各出现两次），
+  // findOccupation 只会返回第一个，所以这里也要用 findOccupation 取 free，
+  // 否则会拿第二个定义的名额去校验第一个定义生成的卡。
+  const seen = new Set();
+  for (const occ of OCCUPATIONS) {
+    if (seen.has(occ.name)) continue;
+    seen.add(occ.name);
+    const def = findOccupation(occ.name);
+    if (!def || !(Number(def.free) > 0)) continue;
+    const ch = gen({
+      name: '测试', occupation: occ.name, age: 30,
+      attrs: { STR: 50, CON: 55, SIZ: 60, DEX: 65, APP: 45, INT: 70, POW: 60, EDU: 75 },
+      skills: {}
+    });
+    fillSkillPoints(ch);
+    const picked = (ch.occFreeSkills || []).length;
+    if (picked !== Number(def.free)) {
+      missing++;
+      if (missingNames.length < 5) missingNames.push(`${occ.name}(${picked}/${def.free})`);
+    }
+  }
+  eq(missing, 0, `所有带 free 名额的职业，AI 生成后特长自动选满${missing ? '，未满的：' + missingNames.join(' ') : ''}`);
+}
+
 // ---- 收尾 ----
 console.log('\n' + '='.repeat(42));
 console.log(`通过 ${passed} 项，失败 ${failed} 项`);

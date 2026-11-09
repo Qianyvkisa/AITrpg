@@ -1222,9 +1222,17 @@ group('randomCharacter 本地随机卡', () => {
   ok(ch.attrs.STR >= 15 && ch.attrs.STR <= 90, '属性在合法范围');
   ok(ch.hp.current === ch.hp.max, 'HP 填满');
   ok(ch.san.current === ch.san.temp, 'SAN 填满');
-  // 职业点把常用技能抬起来
-  ok(ch.skills['侦查'] > 25, '侦查被职业点抬高');
   ok(ch.skills['闪避'] === Math.floor(ch.attrs.DEX / 2), '闪避仍由 DEX 决定');
+
+  // 职业点把常用技能抬起来。
+  //
+  // 这里必须指定职业：randomCharacter 不指定时是随机挑一个，
+  // 而「侦查」并不是每个职业的本职技能——旧写法直接断言
+  // `ch.skills['侦查'] > 25`，撞上本职不含侦查的职业就会偶发失败。
+  // 指定职业后这条断言才是确定的。
+  const ch2 = randomCharacter({ name: '郑野', isPlayer: false, occupation: '私家侦探' });
+  ok(ch2.occupation === '私家侦探', '指定职业被采用');
+  ok(ch2.skills['侦查'] > 25, '侦查被职业点抬高');
 });
 
 group('buildSession 采用设定界面车好的卡', () => {

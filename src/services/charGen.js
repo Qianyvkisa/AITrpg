@@ -595,37 +595,65 @@ export function fillSkillPoints(ch, opts = {}) {
   const HARD_CAP = 99;
 
   /**
-   * 先削掉超支。
+   * 削掉超支。
    *
-   * AI 有时会把技能堆得很高，职业点直接超支（实测出现过预算 200、实际
-   * 花了 450 的卡）。这种情况不能靠"补点"解决——补点只会让账目更难看。
-   * 这里把超出的部分从加得最猛的技能上削回来，削到刚好不超为止。
+   * AI 有时会把技能堆得很高（实测出现过职业点预算 200、实际花 450 的卡）。
+   * 这种情况不能靠"补点"解决——补点只会让账目更难看，只能往下削。
    *
-   * 只削「超过初始值」的部分，且不会把技能削到低于初始值。
+   * v0.2.1 及之前的实现是「每轮削 1 点，最多 2000 轮」，这在 AI **大面积
+   * 铺点**时直接失效：真实 AI 常给几十项技能各加几十点，兴趣点能超支
+   * 4000+ 点（预算只有 INT×2 = 140）。削到 2000 轮就撞上 guard 上限退出，
+   * 剩下的两千多点超支原样留在卡上；玩家在编辑器里看到的就是
+   * 「兴趣点 剩 -2148」外加「职业点还剩 99」——两边同时不对，怎么调都平不了。
+   *
+   * 现在改成**批量削**：
+   *   1) 一次算出该侧的总超支量，不再每轮只挪 1 点；
+   *   2) 从「加点最少」的技能开始削，而不是从最多的削。
+   *      这样削完会留下少数几项高值技能，符合「技能集中在少数几项」的人设；
+   *      反过来从最多的削，最后会把所有技能都削成接近初始值，卡就没脸了。
+   *
+   * 只削「超过初始值」的部分，不会把技能削到低于初始值。
    */
-  const trimOverflow = (budgetNow) => {
-    let guard = 0;
-    while ((budgetNow.occLeft < 0 || budgetNow.intLeft < 0) && guard < 2000) {
-      guard++;
-      // 找出当前加点最多的技能，从它身上削 1 点
-      const target = budgetNow.occLeft < 0 ? 'occ' : 'int';
-      let best = null;
-      let bestSpent = 0;
-      for (const [name, val] of Object.entries(ch.skills || {})) {
-        if (EXCLUDED.has(name)) continue;
-        const spent = (Number(val) || 0) - baseOf(name);
-        if (spent <= 0) continue;
-        const belongsOcc = isOcc(name);
-        if ((target === 'occ') !== belongsOcc) continue;
-        if (spent > bestSpent) { bestSpent = spent; best = name; }
-      }
-      if (!best) break;
-      ch.skills[best] = (Number(ch.skills[best]) || 0) - 1;
+  const trimOverflow = () => {
+    const trimSide = (side) => {
+      // 外层兜底：正常一轮就削平。留几轮是防「削的过程中本职判定变了」
+      // （比如某个自定义槽被削回初始值后不再算本职）导致账目重算。
+      for (let guard = 0; guard < 50; guard++) {
+        const b = skillPointBudget(ch, baseOf, isOcc);
+        const deficit = side === 'occ' ? -b.occLeft : -b.intLeft;
+        if (deficit <= 0) return;
 
-      // 重算账目
-      budgetNow = skillPointBudget(ch, baseOf, isOcc);
-    }
-    return budgetNow;
+        // 收集该侧所有「超过初始值」的技能。
+        //
+        // 注意：这里**不能**跳过 EXCLUDED（信用评级 / 克苏鲁神话 / 自定义技能）。
+        // EXCLUDED 的含义是「补点时不主动往里加」，但 skillPointBudget 算账时
+        // 是照单全收的——AI 给信用评级写 99，那 99 点就实打实记在非本职账上。
+        // 早先这里 continue 掉 EXCLUDED，结果这些技能永远削不掉，账目就永远
+        // 差一截（实测兴趣点剩 -58，怎么都平不了）。
+        const list = [];
+        for (const [name, val] of Object.entries(ch.skills || {})) {
+          const spent = (Number(val) || 0) - baseOf(name);
+          if (!Number.isFinite(spent) || spent <= 0) continue;
+          if ((side === 'occ') !== isOcc(name)) continue;
+          list.push({ name, spent });
+        }
+        if (!list.length) return;   // 没得削了，只能到此为止
+
+        // 从加点最少的开始削，保住少数高值项
+        list.sort((x, y) => x.spent - y.spent);
+
+        let need = deficit;
+        for (const item of list) {
+          if (need <= 0) break;
+          const cut = Math.min(item.spent, need);
+          ch.skills[item.name] = (Number(ch.skills[item.name]) || 0) - cut;
+          need -= cut;
+        }
+      }
+    };
+
+    trimSide('occ');
+    trimSide('int');
   };
 
   // -------------------------------------------------------------------------
@@ -706,7 +734,8 @@ export function fillSkillPoints(ch, opts = {}) {
 
   let budget = skillPointBudget(ch, baseOf, isOcc);
   if (budget.occLeft < 0 || budget.intLeft < 0) {
-    budget = trimOverflow(budget);
+    trimOverflow();
+    budget = skillPointBudget(ch, baseOf, isOcc);
   }
 
   // 职业查不到时 occTotal 为 0，此时只补兴趣点，不凭空造职业点
