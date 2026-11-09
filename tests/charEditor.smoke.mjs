@@ -1,7 +1,8 @@
-﻿// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // 角色卡编辑器渲染冒烟测试
 // 用最小 DOM 桩执行 openCharEditor，确认各标签页能渲染、collect 能收集
 // ---------------------------------------------------------------------------
+import { readFile } from 'node:fs/promises';
 
 // ---- 极简 DOM 桩 ----
 class El {
@@ -485,6 +486,108 @@ const freshBackdrop = modalRoot.children[0];
 freshBackdrop.querySelector('#btnSaveChar').onclick();
 ok(freshCh.skills['克苏鲁神话'] === 0,
   `车卡阶段保存时神话值归零（实际 ${freshCh.skills['克苏鲁神话']}）`);
+
+// ---------------------------------------------------------------------------
+// v0.2.1 回归：AI 生成按钮必须真的能点
+//
+// 真实 bug：玩家反馈「游戏设定 → 编辑角色卡 → 点 AI 生成按钮没反应」。
+// 根因是按钮里用了 window.prompt 收集创作方向，而 **Electron 渲染进程
+// 不支持 prompt**，调用即抛 `Error: prompt() is and will not be supported.`；
+// 更糟的是那句 prompt 在 try 之外，异常没人接住，界面上就表现为「点了没反应」。
+//
+// 之前的 smoke 测试全部传 allowAIGen: false，等于把这块 UI 完全排除在外，
+// 所以一直没发现。这里专门把 AI 生成路径打开测一遍。
+// ---------------------------------------------------------------------------
+console.log('\n== v0.2.1 回归：AI 生成按钮 ==');
+{
+  modalRoot.children = [];
+  const aiCh = createCharacter({ name: '待生成', isPlayer: true });
+  aiCh.occupation = '记者';
+
+  // 造一个「已配置 API」的 state，让按钮走真实分支而不是「AI 未配置」早退
+  const aiState = {
+    apiConfig: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+    tone: '经典恐怖',
+    teammates: []
+  };
+  const aiApi = { chat: async () => ({ ok: false, error: '测试桩：不真的调模型' }) };
+
+  openCharEditor(aiCh, { title: 'AI 生成测试', state: aiState, api: aiApi });
+
+  const aiBackdrop = modalRoot.children[0];
+  const aiBtn = aiBackdrop.querySelector('#btnAIGen');
+  ok(aiBtn, 'AI 生成按钮已渲染');
+
+  // 关键断言：按钮逻辑里不能再直接调用 prompt。
+  // Electron 里 prompt 一调就抛，这是这个 bug 的根源。
+  // 检查时剔除注释行，否则「解释为什么不能用 prompt」的注释会误报。
+  const editorSrc = await readFile(new URL('../src/modals/charEditor.js', import.meta.url), 'utf8');
+  const codeOnly = editorSrc
+    .split('\n')
+    .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))   // 去掉纯注释行
+    .join('\n');
+  ok(!/(?<![.\w])prompt\s*\(/.test(codeOnly),
+    'charEditor.js 不再直接调用 prompt()（Electron 不支持）');
+  ok(editorSrc.includes('openPrompt'),
+    'charEditor.js 改用自家 openPrompt 弹窗收集输入');
+
+  if (aiBtn) {
+    // 点一下：应该弹出输入弹窗，而不是抛错或毫无反应。
+    //
+    // 注意不能 await：onclick 里 await 了 openPrompt，而 openPrompt 要等
+    // 用户点确定才 resolve——测试里没人点，await 会永远挂住。
+    // 这里只验证「点击后立刻进入等待输入的弹窗状态」。
+    let threw = null;
+    try {
+      const p = aiBtn.onclick();
+      // 如果它是同步抛错，这里能拿到；如果是 Promise，先记着不 await
+      if (p && typeof p.catch === 'function') p.catch((e) => { threw = e; });
+    } catch (e) {
+      threw = e;
+    }
+    ok(threw === null, `点击 AI 生成不抛异常${threw ? '（实际抛了 ' + threw.message + '）' : ''}`);
+
+    // 点完之后应该多出一个弹窗（输入创作方向的 prompt-modal）
+    const promptInput = modalRoot.querySelector('#promptInput');
+    ok(!!promptInput, '点击后弹出创作方向输入框');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// v0.2.1 回归：openPrompt 的返回值语义要和 prompt 对齐
+// ---------------------------------------------------------------------------
+{
+  const { openPrompt } = await import('../src/modals/shell.js');
+  ok(typeof openPrompt === 'function', 'shell.js 导出了 openPrompt');
+
+  // 点确定 → 返回输入内容
+  modalRoot.children = [];
+  const p = openPrompt({ title: '测试输入', message: '第一行\n第二行', value: '默认值' });
+  const input = modalRoot.querySelector('#promptInput');
+  ok(input, '输入框已创建');
+  const okBtn = modalRoot.querySelector('#promptOk');
+  ok(okBtn, '确定按钮已创建');
+  if (input && okBtn) {
+    input.value = '1920s 的华裔记者';
+    okBtn.onclick();
+    const val = await p;
+    ok(val === '1920s 的华裔记者', `点确定返回输入内容（实际 ${JSON.stringify(val)}）`);
+  }
+}
+
+// 点取消 → 返回 null
+{
+  const { openPrompt } = await import('../src/modals/shell.js');
+  modalRoot.children = [];
+  const p2 = openPrompt({ title: '取消测试' });
+  const cancelBtn = modalRoot.querySelector('#promptCancel');
+  ok(cancelBtn, '取消按钮已创建');
+  if (cancelBtn) {
+    cancelBtn.onclick();
+    const val2 = await p2;
+    ok(val2 === null, `点取消返回 null（实际 ${JSON.stringify(val2)}）`);
+  }
+}
 
 console.log('\n' + '='.repeat(40));
 console.log(`通过 ${passed} 项，失败 ${failed} 项`);

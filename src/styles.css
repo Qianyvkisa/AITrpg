@@ -559,6 +559,29 @@ body::before {
   animation: modal-in .18s ease;
 }
 .modal.wide { width: min(760px, 94vw); }
+.modal.narrow { width: min(440px, 92vw); }
+
+/* 输入弹窗（替代 Electron 不支持的 window.prompt） */
+.prompt-modal .modal-body { gap: 12px; }
+.prompt-msg {
+  font-size: 12.5px; line-height: 1.9; color: var(--ink-dim);
+  white-space: pre-wrap;
+}
+.prompt-input {
+  width: 100%;
+  padding: 9px 11px;
+  font-family: inherit; font-size: 13px; line-height: 1.6;
+  color: var(--ink);
+  background: #11141b;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  resize: vertical;
+}
+.prompt-input:focus {
+  outline: none;
+  border-color: var(--accent-soft);
+}
+.prompt-input::placeholder { color: var(--ink-faint); }
 @keyframes modal-in {
   from { opacity: 0; transform: translateY(10px) scale(.99); }
   to { opacity: 1; transform: none; }

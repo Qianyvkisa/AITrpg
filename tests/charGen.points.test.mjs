@@ -577,6 +577,90 @@ console.log('\n== v0.2.0 回归：特长与账目不能串账 ==');
   eq(b.intLeft, 0, '换职业后兴趣点仍然补平');
 }
 
+// ---- v0.2.1 回归：职业点必须能花完，不能留闲置预算 ----
+//
+// 真实 bug：玩家反馈「AI 生成的卡还是不会把职业技能点/兴趣技能点用完」。
+// 排查发现两个原因：
+//   1) 「添加 AI 队友」弹窗（teammateCreator）完全没走补点逻辑，
+//      填个职业点两项技能，职业点能剩 250 点、兴趣点剩 150 点；
+//   2) 法医 / 医疗技术员 / 科学搜查研究员 这 3 个职业的固定本职技能太少，
+//      全部顶到 99 也装不下 EDU×4 的预算（缺口 56 / 41 / 130 点），
+//      属于职业表缺项。
+console.log('\n== v0.2.1 回归：职业点不能留闲置预算 ==');
+
+// ---- 用例：EDU 拉满时，每个职业都必须把点数花完 ----
+{
+  const worst = [];
+  for (const occ of OCCUPATIONS) {
+    const ch = gen({
+      name: '测试', occupation: occ.name, age: 30,
+      // EDU 99 是预算上限，最容易暴露「本职技能池装不下预算」
+      attrs: { STR: 50, CON: 50, SIZ: 50, DEX: 50, APP: 50, INT: 99, POW: 50, EDU: 99 },
+      skills: {}   // AI 一项技能都不给，最糟情况
+    });
+    fillSkillPoints(ch);
+    const b = budgetOf(ch);
+    if (b.occLeft > 0 || b.intLeft > 0) {
+      worst.push(`${ch.occupation}(职业剩${b.occLeft}/兴趣剩${b.intLeft})`);
+    }
+  }
+  eq(worst.length, 0, `EDU99 时全职业都不该有闲置点数${worst.length ? '：' + worst.slice(0, 5).join('、') : ''}`);
+}
+
+// ---- 用例：这 3 个曾经的「重灾区」职业必须补齐 ----
+{
+  for (const occName of ['法医', '医疗技术员', '科学搜查研究员']) {
+    const ch = gen({
+      name: '测试', occupation: occName, age: 30,
+      attrs: { STR: 50, CON: 50, SIZ: 50, DEX: 50, APP: 50, INT: 99, POW: 50, EDU: 99 },
+      skills: {}
+    });
+    fillSkillPoints(ch);
+    const b = budgetOf(ch);
+    eq(b.occLeft, 0, `${occName}：职业点花完`);
+    eq(b.intLeft, 0, `${occName}：兴趣点花完`);
+  }
+}
+
+// ---- 用例：模拟「添加 AI 队友」的建卡路径 ----
+//
+// teammateCreator 原来是 createCharacter + 手填技能，直接 push 进队友列表，
+// 从不调用 fillSkillPoints。这里复刻那条路径，验证补点后账目干净。
+{
+  for (const occName of ['退伍军医', '记者', '医生', '队医']) {
+    const ch = createCharacter({ name: '队友', isPlayer: false });
+    ch.attrs = { STR: 50, CON: 55, SIZ: 60, DEX: 65, APP: 45, INT: 70, POW: 60, EDU: 75 };
+    refreshDerived(ch);
+    ch.occupation = occName;
+    // 玩家只填两项擅长技能（teammateCreator 里的行为）
+    ch.skills['急救'] = Math.max(ch.skills['急救'] ?? 0, 60);
+    ch.skills['医学'] = Math.max(ch.skills['医学'] ?? 0, 60);
+
+    const before = budgetOf(ch);
+    ok(before.occLeft > 0 || before.intLeft > 0, `前提：${occName} 建卡时确实有大量点数没花`);
+
+    fillSkillPoints(ch);
+    const after = budgetOf(ch);
+    eq(after.occLeft, 0, `${occName}：队友建卡补点后职业点花完`);
+    eq(after.intLeft, 0, `${occName}：队友建卡补点后兴趣点花完`);
+  }
+}
+
+// ---- 用例：补点后账目不能反过来超支 ----
+{
+  for (const occName of ['法医', '医疗技术员', '科学搜查研究员', '记者', '士兵']) {
+    const ch = gen({
+      name: '测试', occupation: occName, age: 30,
+      attrs: { STR: 50, CON: 50, SIZ: 50, DEX: 50, APP: 50, INT: 80, POW: 50, EDU: 85 },
+      skills: { '侦查': 70 }
+    });
+    fillSkillPoints(ch);
+    const b = budgetOf(ch);
+    ok(b.occLeft >= 0, `${occName}：职业点不超支（剩 ${b.occLeft}）`);
+    ok(b.intLeft >= 0, `${occName}：兴趣点不超支（剩 ${b.intLeft}）`);
+  }
+}
+
 // ---- 收尾 ----
 console.log('\n' + '='.repeat(42));
 console.log(`通过 ${passed} 项，失败 ${failed} 项`);

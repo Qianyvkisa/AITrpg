@@ -4,7 +4,7 @@
 // 标签页：基本信息 / 属性 / 技能 / 状态与资产 / 背景 / 装备与经历
 // 支持手动填写与 AI 一键生成。
 // ---------------------------------------------------------------------------
-import { openModal } from './shell.js';
+import { openModal, openPrompt } from './shell.js';
 import {
   ATTRS, SKILL_DEFS, baseSkillValue, refreshDerived, skillLevels,
   normalizeCharacter
@@ -763,22 +763,33 @@ function openCharEditorImpl(ch, opts = {}) {
     const aiBtn = backdrop.querySelector('#btnAIGen');
     if (aiBtn) {
       aiBtn.onclick = async () => {
-        if (!state?.apiConfig || !api?.chat) {
-          alert('AI 未配置，请先到「设置」里填好 API。');
-          return;
-        }
-        collect();
-
-        // 弹个小表单收集创作方向
-        const brief = prompt(
-          '想让 AI 生成什么样的调查员？\n（可以直接回车留空，让 AI 自由发挥）\n\n例如：1920s 的华裔记者，胆小但执着',
-          ''
-        );
-        if (brief === null) return; // 取消
-
-        aiBtn.disabled = true;
-        aiBtn.textContent = '生成中…';
+        // 整个流程都放在 try 里。
+        //
+        // 之前的实现把「收集创作方向」放在 try 外面，而用的是 window.prompt——
+        // Electron 渲染进程不支持 prompt，调用即抛
+        // `Error: prompt() is and will not be supported.`，
+        // 异常没人接住，按钮就表现为「点了完全没反应」（只有控制台有红字）。
+        // 现在改用自家的 openPrompt 弹窗，并且把每一步都纳入异常处理，
+        // 任何环节出问题都能给玩家一句看得懂的提示，而不是静默失败。
         try {
+          if (!state?.apiConfig || !api?.chat) {
+            alert('AI 未配置，请先到「设置」里填好 API。');
+            return;
+          }
+          collect();
+
+          // 弹个小表单收集创作方向
+          const brief = await openPrompt({
+            title: 'AI 生成角色卡',
+            message: '想让 AI 生成什么样的调查员？\n留空则让 AI 自由发挥。\n\n例如：1920s 的华裔记者，胆小但执着',
+            placeholder: '（可留空）',
+            okText: '开始生成'
+          });
+          if (brief === null) return; // 取消
+
+          aiBtn.disabled = true;
+          aiBtn.textContent = '生成中…';
+
           const { generateCharacter } = await import('../services/charGen.js');
           const res = await generateCharacter(state.apiConfig, {
             brief: brief.trim(),

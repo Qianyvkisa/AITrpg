@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 import { openModal } from './shell.js';
 import { createCharacter, refreshDerived, rollAttributes } from '../core/character.js';
+import { fillSkillPoints } from '../services/charGen.js';
 
 export function openTeammateCreator(state, onChanged) {
   const { backdrop, close } = openModal(`
@@ -58,6 +59,14 @@ export function openTeammateCreator(state, onChanged) {
     for (const sk of picks) {
       ch.skills[sk] = Math.max(ch.skills[sk] ?? 0, 60);
     }
+
+    // 把没花完的职业点/兴趣点补齐。
+    //
+    // 这条路径原来是直接 push 进 state.teammates 的，完全没走补点逻辑：
+    // 玩家填个职业、点两项擅长技能，生成的队友职业点能剩 250 点、
+    // 兴趣点剩 150 点（实测），在跑团里就是个废人——技能检定几乎过不了。
+    // 现在统一交给 fillSkillPoints 收尾，和其他车卡入口保持一致。
+    fillSkillPoints(ch);
 
     state.teammates.push(ch);
     onChanged?.();
