@@ -25,6 +25,15 @@ import {
 import { openSettings, openModules, openCharEditor, openTeammateCreator, openSaves, openGameSetup, openCharLibrary } from './modals/index.js';
 import { hasRunTurn, menuButtonVisibility } from './ui/menu.js';
 import { buildSession } from './core/session.js';
+import {
+  AUTO_ADVANCE_MAX_TURNS,
+  autoAdvanceBlocker,
+  blockerMessage,
+  clampDelay,
+  isTerminalBlocker,
+  readAutoAdvanceState,
+  shouldReportBlocker
+} from './core/autoAdvance.js';
 import { openingFor } from './core/builtinModules.js';
 const $ = (sel) => document.querySelector(sel);
 
@@ -38,6 +47,9 @@ let busy = false;
 // ---------------------------------------------------------------------------
 /** 显示主界面 */
 function showStartScreen() {
+  // 回主界面一律停掉自动推进：这是最后一道保险。
+  // 即便某个入口漏了 cancel，也不会在玩家看着主界面时后台偷偷发请求。
+  cancelAutoAdvance();
   $('#startScreen').hidden = false;
   $('#app').hidden = true;
   // 回到开始界面：重新放开「加队友 / 加调查员」，这时还能调整队伍
@@ -82,29 +94,188 @@ function applyModeToComposer() {
   if (sendBtn) {
     sendBtn.textContent = isSpectator ? '推进' : '行动';
   }
+
+  // 「自动推进」按钮只在旁观模式下出现：
+  // 玩家模式必须等玩家输入行动，自动推进没有输入源，放出来只会让人误点。
+  const autoBtn = $('#btnAutoAdvance');
+  if (autoBtn) {
+    autoBtn.hidden = !isSpectator;
+    syncAutoAdvanceButton();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 旁观模式自动推进
+//
+// 旁观模式本来就要玩家每轮手动点「推进」，一局跑下来点上百次，纯属机械劳动。
+// 这里给一个开关：打开后每轮 KP 叙述完，等一小段阅读时间就自动推进下一轮。
+//
+// 必须处理好的四件事（都是容易出 bug 的地方）：
+//   1) 剧情结束（scenario.ended）→ 立刻停，不能再推进
+//   2) 有待掷骰（pending roll）→ 不推进。虽然旁观模式下队友检定会自动掷，
+//      但玩家角色若存在（比如从玩家模式读档切过来）仍可能产生 pending，
+//      这时推进会让 KP 在骰点未定时编造结果
+//   3) 用户手动点「推进」/「停止」/回主界面 → 取消掉挂起的定时器，
+//      否则会在用户已经离开这个界面后突然发一次请求
+//   4) 上一次请求还在跑（busy）→ 不重复触发
+// ---------------------------------------------------------------------------
+
+/** 挂起的自动推进定时器 id */
+let autoAdvanceTimer = null;
+
+/** 取消挂起的自动推进（幂等） */
+function cancelAutoAdvance() {
+  if (autoAdvanceTimer !== null) {
+    clearTimeout(autoAdvanceTimer);
+    autoAdvanceTimer = null;
+  }
+}
+
+/** 把按钮外观同步成当前开关状态 */
+function syncAutoAdvanceButton() {
+  const btn = $('#btnAutoAdvance');
+  if (!btn) return;
+  const on = !!state.autoAdvance && state.mode === 'spectator';
+  btn.classList.toggle('on', on);
+  btn.textContent = on ? '自动推进 · 开' : '自动推进';
+  btn.title = on
+    ? '正在自动推进，点一下停止'
+    : '开启后，每轮 KP 叙述完自动继续推进，不需要手动点「推进」';
+}
+
+/** 取当前状态下「能否推进」的结论（null = 可以） */
+function autoAdvanceBlockerNow() {
+  return autoAdvanceBlocker(
+    readAutoAdvanceState(state, { busy, pendingRoll: hasPendingRoll() })
+  );
+}
+
+/** 停止自动推进，并把原因告诉玩家（避免「自动推进莫名停了」的困惑） */
+function stopAutoAdvance(reason) {
+  state.autoAdvance = false;
+  cancelAutoAdvance();
+  syncAutoAdvanceButton();
+
+  // 只有终局原因值得留一条消息；pending-roll 走的是「暂停」路径，
+  // 由 spectatorAdvance 自己发提示，不会走到这里。
+  if (isTerminalBlocker(reason)) {
+    const why = blockerMessage(reason, AUTO_ADVANCE_MAX_TURNS);
+    engine?.pushMessage({ role: 'system', text: `【自动推进已停止】${why}。` });
+  }
+}
+
+/**
+ * 安排下一次自动推进。
+ * 已经在跑或已关闭时是安全的空操作。
+ */
+function scheduleAutoAdvance() {
+  cancelAutoAdvance();
+
+  const blocker = autoAdvanceBlockerNow();
+  if (blocker) {
+    // busy / pending-roll 都是**暂时**状态：等请求跑完、骰子掷完后
+    // resumeAutoAdvanceIfNeeded 会重新接上，这里不能把开关关掉。
+    // ended / max-turns 是终局，才真正停止。
+    if (isTerminalBlocker(blocker)) stopAutoAdvance(blocker);
+    return;
+  }
+
+  const delay = clampDelay(state.autoAdvanceDelay);
+  autoAdvanceTimer = setTimeout(async () => {
+    autoAdvanceTimer = null;
+    // 定时器触发时状态可能已经变了（用户点了停止 / 切回主界面 / 剧情结束）
+    const now = autoAdvanceBlockerNow();
+    if (now) {
+      if (isTerminalBlocker(now)) stopAutoAdvance(now);
+      return;
+    }
+    await spectatorAdvance({ fromAuto: true });
+    // 一轮跑完后再次安排：只要开关还开着、且没被待掷骰挡住就会一直循环
+    if (state.autoAdvance) scheduleAutoAdvance();
+  }, delay);
+}
+
+/**
+ * 若自动推进开着、且当前局面已经可以推进（比如刚掷完骰），就接上。
+ * 已经在计时中则不动，避免重置倒计时让玩家等更久。
+ */
+function resumeAutoAdvanceIfNeeded() {
+  if (!state.autoAdvance) return;
+  if (autoAdvanceTimer !== null) return;
+  if (autoAdvanceBlockerNow() !== null) return;
+  scheduleAutoAdvance();
+}
+
+/** 切换自动推进开关 */
+function toggleAutoAdvance() {
+  if (state.mode !== 'spectator') return;
+
+  if (state.autoAdvance) {
+    stopAutoAdvance(null);
+    return;
+  }
+
+  // 开启前先看当前局面能不能推进，避免开了却一动不动
+  const blocker = autoAdvanceBlockerNow();
+  if (blocker && blocker !== 'off') {
+    const why = shouldReportBlocker(blocker) ? blockerMessage(blocker, AUTO_ADVANCE_MAX_TURNS) : '';
+    if (why) alert(`${why}，没法开始自动推进。`);
+    return;
+  }
+
+  state.autoAdvance = true;
+  syncAutoAdvanceButton();
+  scheduleAutoAdvance();
 }
 
 /** 旁观模式下「推进」：没有输入内容时给 KP 一个默认的推进指令 */
-async function spectatorAdvance() {
+async function spectatorAdvance(opts = {}) {
+  if (busy) return;
+
+  // 手动推进时先把挂起的自动推进取消，避免紧接着又触发一次
+  if (!opts.fromAuto) cancelAutoAdvance();
+
   const input = $('#input');
   const text = input.value.trim() || '（继续推进剧情，让调查员们继续行动）';
   input.value = '';
   input.style.height = 'auto';
 
-  if (busy) return;
   busy = true;
   const btn = $('#btnSend');
   btn.disabled = true;
   try {
-    await engine.takeTurn(text);
+    const res = await engine.takeTurn(text);
+    // 只有这一轮真的跑成了才计轮数。KP 连不上时不计，否则轮数会虚增，
+    // 而且自动推进会拿着「成功」的信号继续往下跑。
+    if (res?.ok === false) {
+      if (opts.fromAuto) stopAutoAdvance(null);
+      engine.pushMessage({
+        role: 'system',
+        text: '【自动推进已停止】KP 连接失败，检查模型配置后再继续。'
+      });
+      return;
+    }
     state.turns = (state.turns || 0) + 1;
     await autoSave();
   } catch (e) {
     console.error(e);
     engine.pushMessage({ role: 'system', text: `【错误】${e.message}` });
+    // 自动推进时出错要停下来，否则会带着错误一路空转
+    if (opts.fromAuto) stopAutoAdvance(null);
   } finally {
     btn.disabled = false;
     busy = false;
+    updateRollGate();
+    // 这一轮若产生了待掷骰，自动推进要**暂停**（不是关闭）：
+    // 开关保持开着，玩家掷完骰后 resumeAutoAdvanceIfNeeded 会把它接上。
+    // 这里只给一句提示，让玩家知道在等自己掷骰。
+    if (opts.fromAuto && hasPendingRoll()) {
+      cancelAutoAdvance();
+      engine?.pushMessage({
+        role: 'system',
+        text: '【自动推进已暂停】有检定等你掷骰，掷完会自动继续。'
+      });
+    }
   }
 }
 
@@ -274,6 +445,10 @@ async function handleRollClick(rollId) {
     busy = false;
     updateRollGate();
     scrollToBottom();
+    // 掷骰完成后如果自动推进还开着，把被 pending-roll 挡住的推进接上。
+    // 放在这里（而不是 updateRollGate 里）是因为 updateRollGate 在进游戏、
+    // 开局等场合也会被调用，在那里调度会导致定时器被反复重置。
+    resumeAutoAdvanceIfNeeded();
   }
 }
 
@@ -335,6 +510,8 @@ function bindUI() {
   // ---- 跑团界面 ----
   $('#btnBackToMenu').onclick = () => {
     if (busy) { alert('守密人正在叙述，稍等一下再回主界面。'); return; }
+    // 回主界面必须停掉自动推进，否则会在后台继续发请求烧 token
+    stopAutoAdvance(null);
     showStartScreen();
   };
 
@@ -347,6 +524,10 @@ function bindUI() {
   $('#btnSaves').onclick = openSaveDialog;
 
   $('#btnSend').onclick = () => (state.mode === 'spectator' ? spectatorAdvance() : sendAction());
+
+  // 自动推进开关（只在旁观模式可见，由 applyModeToComposer 控制）
+  const autoAdvanceBtn = $('#btnAutoAdvance');
+  if (autoAdvanceBtn) autoAdvanceBtn.onclick = toggleAutoAdvance;
 
   // 掷骰按钮：用事件委托，避免每渲染一条待掷骰消息就重新绑一次
   const messagesBox = $('#messages');
@@ -390,7 +571,10 @@ function openSaveDialog() {
     allowSave: hasRunTurn(state),
     getSnapshot: () => buildSnapshot(state),
     onLoad: async (data) => {
+      // 读档换掉整局状态，先停掉自动推进
+      cancelAutoAdvance();
       applySnapshot(state, data);
+      state.autoAdvance = false;
       // 读档后立刻写回自动存档：这样「继续」与当前这一局保持一致，
       // 避免从手动存档进入游戏、回主界面后却显示「开始」而误以为进度丢了
       await autoSave();
@@ -423,6 +607,9 @@ function beginGame(cfg) {
   // 设定界面已经车好的角色卡随 cfg 一起传进来
   const session = buildSession(cfg);
 
+  // 新开一局：上一局的自动推进必须停掉，别让它继续在后台跑
+  cancelAutoAdvance();
+
   resetGameState();
   state.mode = session.mode;
   state.module = session.module;
@@ -430,6 +617,8 @@ function beginGame(cfg) {
   state.companions = session.companions || [];
   state.playerChar = session.playerChar;
   state.turns = 0;
+  // 自动推进默认关闭，由玩家在旁观模式里主动打开
+  state.autoAdvance = false;
 
   addOpening(session.module, session.mode);
 
@@ -443,7 +632,12 @@ async function continueGame() {
   const auto = await window.api.readSave('auto');
   if (!auto) { alert('没有找到可继续的进度。'); refreshStartScreen(); return; }
 
+  // 读档会换掉整局状态，先把上一局的自动推进停掉
+  cancelAutoAdvance();
   applySnapshot(state, auto);
+  // 自动推进是「这一次的观看方式」，不跟着存档走：读档后一律关闭，
+  // 否则玩家一读档就被自动推进带着跑，来不及看清局面。
+  state.autoAdvance = false;
   // 旁观模式本来就没有玩家角色，不要凭空补一个
   if (!state.playerChar && state.mode !== 'spectator') state.playerChar = createDefaultCharacter();
   enterGame();
@@ -497,9 +691,12 @@ async function sendAction() {
 
   try {
     // 引擎内部处理「掷骰后自动续跑」，并带次数上限
-    await engine.takeTurn(text);
-    state.turns = (state.turns || 0) + 1;
-    await autoSave();
+    const res = await engine.takeTurn(text);
+    // KP 连不上时不计轮数：否则「第 N 轮」会虚增，读档后轮数也对不上
+    if (res?.ok !== false) {
+      state.turns = (state.turns || 0) + 1;
+      await autoSave();
+    }
   } catch (e) {
     console.error(e);
     engine.pushMessage({ role: 'system', text: `【错误】${e.message}` });
@@ -564,3 +761,14 @@ function addOpening(module, mode = 'player') {
 // 启动
 // ---------------------------------------------------------------------------
 window.addEventListener('DOMContentLoaded', init);
+
+// ---------------------------------------------------------------------------
+// 开发期测试钩子
+//
+// 只挂三个只读/驱动用的引用，供 tools/ui/verify-*.cjs 里的 Electron 脚本
+// 断言真实界面状态（单元测试碰不到 DOM，这些脚本补那一层）。
+// 不涉及任何密钥，也不改变正常运行路径：即便没人用也只是几个全局引用。
+// ---------------------------------------------------------------------------
+window.__cocState = state;
+window.__applyModeToComposer = applyModeToComposer;
+window.__toggleAutoAdvance = toggleAutoAdvance;

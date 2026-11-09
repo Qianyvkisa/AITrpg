@@ -1,6 +1,6 @@
 {
   "name": "coc-keeper",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "COC 7th Edition AI Keeper - AI 同时担任守密人与队友调查员",
   "main": "main.js",
   "scripts": {

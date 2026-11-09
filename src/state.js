@@ -29,6 +29,11 @@ export function createInitialState() {
     // KP 说完后是否让队友 AI 自发接话，以及接话概率
     autoTeammate: true,
     teammateChance: 0.7,
+    // 旁观模式「自动推进」：开启后每轮 KP 叙述完自动继续推进，不需要手动点按钮。
+    // 只在 spectator 模式下有意义（玩家模式要等玩家输入行动，自动推进没有输入源）。
+    autoAdvance: false,
+    // 自动推进的间隔毫秒数：给玩家留出阅读时间，太快会像刷屏
+    autoAdvanceDelay: 2500,
     // apiConfig 由主进程 config:get 填充；这里只放渲染层需要的字段
     apiConfig: {
       baseUrl: '',

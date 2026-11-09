@@ -105,7 +105,7 @@ export class GameEngine {
     if (!text.trim()) return;
     this.pushMessage({ role: 'user', text });
     this.state.scenario.events.push(`玩家：${text.slice(0, 60)}`);
-    await this.runKeeper();
+    return this.runKeeper();
   }
 
   async runKeeper() {
@@ -143,7 +143,9 @@ export class GameEngine {
       msg.text = res.canceled ? '【已取消】' : `【KP 连接失败】${res.error}`;
       msg.error = true;
       this.emit({ type: 'stream-end', messageId: msg.id });
-      return;
+      // 返回 false 让上层知道「这一轮其实没跑成」。
+      // 自动推进依赖这个信号：API 挂了却当成正常轮次，会一路空转 200 次失败请求。
+      return false;
     }
 
     msg.text = res.text || msg.text;
@@ -162,6 +164,8 @@ export class GameEngine {
       msg.resolved = true;
       await this.resolveDirectives(directives);
     }
+
+    return true;
   }
 
   // -------------------------------------------------------------------------
@@ -260,15 +264,17 @@ export class GameEngine {
    */
   async takeTurn(text) {
     const before = this.state.messages.length;
-    await this.playerAction(text);
+    // playerAction 会返回 runKeeper 的成败；KP 连不上时不必再往下续跑
+    const firstOk = await this.playerAction(text);
 
     // 有玩家待掷骰：交给界面等玩家点按钮
     if (this.pendingRolls().length) {
       this.emit({ type: 'state-changed' });
-      return 0;
+      return { chain: 0, ok: firstOk !== false };
     }
 
     let chain = 0;
+    let ok = firstOk !== false;
     while (chain < MAX_CHAIN) {
       const newRolls = this.state.messages.slice(before).filter((m) => m.role === 'roll');
       const pending = newRolls.filter((m) => !m.fedBack);
@@ -276,13 +282,14 @@ export class GameEngine {
 
       for (const r of pending) r.fedBack = true;
       chain++;
-      await this.runKeeper();
+      const stepOk = await this.runKeeper();
+      if (stepOk === false) { ok = false; break; }
     }
 
     // KP 说完之后，让队友自发接一句，避免整场只有 KP 在输出
-    await this.autoTeammateChatter();
+    if (ok) await this.autoTeammateChatter();
 
-    return chain;
+    return { chain, ok };
   }
 
   /**

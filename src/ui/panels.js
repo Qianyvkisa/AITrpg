@@ -51,7 +51,12 @@ export function barHtml(label, cur, max, cls) {
 
 export function renderScene(state) {
   setText('#sceneName', state.scenario.scene || '尚未开始');
-  const turns = state.messages.filter((m) => m.role === 'user').length;
+  // 轮数取两个来源的较大值：
+  //   玩家模式靠 user 消息条数（每轮一条行动）
+  //   旁观模式没有 user 消息，只能靠 state.turns 显式计数
+  // 原来只数 user 消息，导致旁观模式跑了几十轮，右上角始终是空的。
+  const fromMessages = state.messages.filter((m) => m.role === 'user').length;
+  const turns = Math.max(fromMessages, Number(state.turns) || 0);
   setText('#turnCounter', turns ? `第 ${turns} 轮` : '');
 }
 

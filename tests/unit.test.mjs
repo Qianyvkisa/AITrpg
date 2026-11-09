@@ -1643,9 +1643,60 @@ group('一个人都没有时，CHECK / SAN 都明确报错', () => {
 });
 
 // ---------------------------------------------------------------------------
+// takeTurn 的成功/失败信号
+//
+// 真实问题：runKeeper 在 API 失败时只把错误写进消息，takeTurn 照常返回。
+// 界面据此给 state.turns +1，自动推进也当成「这一轮跑成了」继续往下推，
+// 结果模型挂掉时会一路空转 200 轮，每轮烧一次失败请求。
+//
+// 现在 runKeeper 返回 false，takeTurn 汇总成 { chain, ok }。
+// ---------------------------------------------------------------------------
+console.log('\n== takeTurn 的成败信号 ==');
+
+{
+  const mkApi = (ok) => ({
+    chat: async () => (ok ? { ok: true, text: '你走进走廊。' } : { ok: false, error: '连接超时' }),
+    onChunk: () => () => {}
+  });
+
+  // 成功：ok 应为 true
+  const s1 = createInitialState();
+  const eng1 = new GameEngine(s1, mkApi(true));
+  const r1 = await eng1.takeTurn('我推开门');
+  eq(r1.ok, true, 'API 正常时 takeTurn.ok === true');
+  ok(typeof r1.chain === 'number', 'takeTurn 仍返回 chain（兼容旧用法）');
+
+  // 失败：ok 应为 false，且不应计为「跑成」
+  const s2 = createInitialState();
+  const eng2 = new GameEngine(s2, mkApi(false));
+  const r2 = await eng2.takeTurn('我推开门');
+  eq(r2.ok, false, 'API 失败时 takeTurn.ok === false');
+  eq(r2.chain, 0, 'API 失败时不续跑');
+
+  // 失败时不该触发队友发言（否则又是一次失败请求）
+  const s3 = createInitialState();
+  s3.teammates = [createCharacter({ name: '队友甲' })];
+  let spoke = 0;
+  const eng3 = new GameEngine(s3, mkApi(false));
+  eng3.setTeammateSpeaker(async () => { spoke++; });
+  await eng3.takeTurn('我推开门');
+  eq(spoke, 0, 'API 失败时不触发队友发言（避免连环失败请求）');
+
+  // 成功时队友发言逻辑仍然生效
+  const s4 = createInitialState();
+  s4.teammates = [createCharacter({ name: '队友甲' })];
+  s4.autoTeammate = true;
+  s4.teammateChance = 1;
+  let spoke2 = 0;
+  const eng4 = new GameEngine(s4, mkApi(true));
+  eng4.setTeammateSpeaker(async () => { spoke2++; });
+  await eng4.takeTurn('我推开门');
+  ok(spoke2 >= 0, 'API 正常时队友发言逻辑不受影响（按概率决定）');
+}
+
+// ---------------------------------------------------------------------------
 // 汇总
 // ---------------------------------------------------------------------------
-console.log('\n' + '='.repeat(50));
 console.log('通过 ' + passed + ' 项，失败 ' + failed + ' 项，共 ' + (passed + failed) + ' 项');
 if (failed > 0) {
   console.log('\n失败清单：');

@@ -467,6 +467,23 @@ body::before {
   gap: 8px;
 }
 
+/* 自动推进「开启中」：用黄铜色描边 + 呼吸感，让玩家一眼看出它正在自己跑，
+   免得以为卡住了、或者忘了它开着而奇怪「怎么一直自己在动」。 */
+#btnAutoAdvance.on {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+  background: rgba(184, 137, 74, .12);
+  animation: auto-advance-pulse 2.4s ease-in-out infinite;
+}
+@keyframes auto-advance-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(184, 137, 74, .35); }
+  50%      { box-shadow: 0 0 0 4px rgba(184, 137, 74, 0); }
+}
+/* 用户开了「减少动态效果」就别再呼吸，静态高亮足够表达状态 */
+@media (prefers-reduced-motion: reduce) {
+  #btnAutoAdvance.on { animation: none; }
+}
+
 .status-pane { display: flex; flex-direction: column; gap: 8px; }
 
 .stat-block {
