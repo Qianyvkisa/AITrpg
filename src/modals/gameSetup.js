@@ -233,13 +233,21 @@ export async function openGameSetup({ onStart, state = null, api = null }) {
   /** 一张卡的摘要行 */
   const charRow = (ch, { label, onEdit, onRandom, onImport, onSaveToLib, onRemove }) => {
     const d = ch.derived || {};
+    // 空白卡：没职业、也没加过任何技能点。
+    //
+    // 玩家默认卡按产品约定就是空白（等玩家自己点 AI 生成 / 随机 / 导入），
+    // 但界面上原来只显示「无职业 · HP 10 SAN 50」，看起来像一张正常的卡，
+    // 玩家很容易直接开团，上桌才发现技能全是初始值。
+    // 这里给一条明确的提示，把「这张卡还没车」说出来。
+    const isEmpty = !String(ch.occupation || '').trim();
     const el = document.createElement('div');
-    el.className = 'char-row';
+    el.className = 'char-row' + (isEmpty ? ' is-empty' : '');
     el.innerHTML = `
       <div class="cr-main">
         <span class="cr-label">${escapeHtml(label)}</span>
         <span class="cr-name">${escapeHtml(ch.name)}</span>
         <span class="cr-meta">${escapeHtml(ch.occupation || '无职业')} · HP ${d.HP ?? '?'} SAN ${d.SAN ?? '?'} MP ${d.MP ?? '?'}</span>
+        ${isEmpty ? '<span class="cr-empty-tip">这张卡还没车：点「编辑」后选「AI 生成」，或直接点「随机」</span>' : ''}
       </div>
       <div class="cr-actions">
         <button class="btn ghost sm" data-act="edit">编辑</button>

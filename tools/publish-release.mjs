@@ -15,7 +15,10 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO = 'Qianyvkisa/AITrpg';
-const TAG = 'v0.2.2';
+// 版本号与产物名统一从 package.json 读，别再手改这里。
+// 漏改过一次：正文写 v0.2.2 而 tag 还是旧的，Release 页面版本号对不上。
+const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+const TAG = `v${pkg.version}`;
 const BODY_FILE = join(root, 'tools', 'ui', 'shots', 'release-body.json');
 
 // 本地产物名 vs 上传到 GitHub 的附件名，这两个必须分开看。
@@ -29,7 +32,6 @@ const BODY_FILE = join(root, 'tools', 'ui', 'shots', 'release-body.json');
 //       name/label/PATCH 三条路都试过，改不了。
 //
 // 结论：本地读 COC跑团.exe，上传时显式用 ASCII 名，别让 GitHub 去剥。
-const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const productName = pkg.build?.productName || pkg.name;
 const LOCAL_NAME = `${productName}.exe`;
 // 附件名：把非 ASCII 字符去掉，剩下的 ASCII 部分兜底成 'COC'

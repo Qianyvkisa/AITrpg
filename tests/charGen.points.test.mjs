@@ -18,6 +18,8 @@ import {
   skillPointBudget, isOccupationalSkill, findOccupation, SOCIAL_SKILLS, OCCUPATIONS
 } from '../src/core/occupations.js';
 import { SKILL_DEFS, baseSkillValue, createCharacter, normalizeCharacter, refreshDerived } from '../src/core/character.js';
+import { createTeammate } from '../src/core/session.js';
+import { createDefaultCharacter } from '../src/state.js';
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -786,6 +788,69 @@ console.log('\n== v0.2.1 回归：职业点不能留闲置预算 ==');
     }
   }
   eq(missing, 0, `所有带 free 名额的职业，AI 生成后特长自动选满${missing ? '，未满的：' + missingNames.join(' ') : ''}`);
+}
+
+// ---------------------------------------------------------------------------
+// v0.2.3 回归：游戏设定里「预置队友卡」和「默认玩家卡」也必须点数花完
+//
+// 真实 bug（玩家反馈「最开始游戏设定内 AI 生成的角色卡默认还是没点兴趣点」）：
+//   createTeammate 里只写了 `ch.skills[sk] = Math.max(ch.skills[sk] ?? 0, 60)`，
+//   把模板点名的三项硬设成 60 就结束了，剩下的预算一分没花。
+//   实测 200 张队友卡：**200 张职业点有剩余、196 张兴趣点完全没动**。
+//   玩家打开游戏设定看到的就是「兴趣点 0/140，剩 140」。
+//
+// 顺带修掉：模板池没有 gender 字段 → 200/200 张队友卡性别为空。
+// ---------------------------------------------------------------------------
+console.log('\n== v0.2.3 回归：预置队友卡点数必须花完 ==');
+
+{
+  let occLeft = 0, intLeft = 0, occOver = 0, intOver = 0, noGender = 0;
+  const bad = [];
+  for (let i = 0; i < 60; i++) {
+    const t = createTeammate(i);
+    const b = budgetOf(t);
+    if (b.occLeft > 0) { occLeft++; if (bad.length < 4) bad.push(`${t.name}/${t.occupation} occ剩${b.occLeft}`); }
+    if (b.intLeft > 0) intLeft++;
+    if (b.occLeft < 0) occOver++;
+    if (b.intLeft < 0) intOver++;
+    if (!t.gender || t.gender === '未注明') noGender++;
+  }
+  eq(occLeft, 0, `预置队友卡职业点无剩余${bad.length ? '（' + bad.join('，') + '）' : ''}`);
+  eq(intLeft, 0, '预置队友卡兴趣点无剩余');
+  eq(occOver, 0, '预置队友卡职业点不超支');
+  eq(intOver, 0, '预置队友卡兴趣点不超支');
+  eq(noGender, 0, '预置队友卡性别不为空');
+}
+
+// 模板点名的技能要真的「看得出来擅长」——补点不能把它们埋掉。
+//
+// 注意：createTeammate 每次按随机起点取模板，不能只测某一个 index，
+// 否则断言会随随机数漂移（第一版就栽在这里：取了 0 号却假定是退伍军医）。
+// 这里遍历多次，只要求「每次被点名的技能里，至少有一项明显高于初始值」。
+{
+  let buried = 0;
+  const samples = [];
+  for (let i = 0; i < 20; i++) {
+    const t = createTeammate(i);
+    const named = ['急救', '医学', '射击：手枪', '图书馆使用', '历史', '神秘学',
+      '话术', '心理学', '侦查', '估价', '说服', '潜行', '聆听',
+      '格斗：斗殴', '攀爬', '投掷', '母语'];
+    const raised = named.filter((sk) => {
+      const d = SKILL_DEFS.find((x) => x.name === sk);
+      if (!d) return false;
+      return (t.skills[sk] ?? 0) > baseSkillValue(d, t.attrs);
+    });
+    if (!raised.length) { buried++; if (samples.length < 3) samples.push(`${t.name}/${t.occupation}`); }
+  }
+  eq(buried, 0, `补点后角色仍保有擅长的技能${buried ? '（被埋掉的：' + samples.join('，') + '）' : ''}`);
+}
+
+// 玩家默认卡：产品约定是**空白卡**，等玩家自己点 AI 生成 / 随机 / 导入。
+// 所以这里断言的是「确实空白」，防止以后有人好心预填一张卡。
+{
+  const p = createDefaultCharacter();
+  eq(p.occupation, '', '默认玩家卡职业留空（等玩家点 AI 生成）');
+  eq(p.gender, '', '默认玩家卡性别留空');
 }
 
 // ---- 收尾 ----

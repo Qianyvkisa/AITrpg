@@ -1241,6 +1241,21 @@ body::before {
 .char-row .cr-meta { font-size: 10px; color: var(--ink-faint); font-family: var(--font-mono); }
 .char-row .cr-actions { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
 
+/* 空白卡（没职业、没加点）：玩家默认卡就是这个状态，等他自己点 AI 生成 / 随机。
+   不给提示的话，玩家会以为这是一张正常卡直接开团，上桌才发现技能全是初始值。
+   配色用现成的 --accent（陈旧黄铜），和整体暗色主题一致。 */
+.char-row.is-empty {
+  border-style: dashed;
+  border-color: var(--accent-soft);
+  background: rgba(184, 137, 74, .07);
+}
+.char-row .cr-empty-tip {
+  flex: 1 0 100%;
+  font-size: 10px;
+  color: var(--accent);
+  margin-top: 2px;
+}
+
 .start-screen {
   position: fixed;
   inset: 0;

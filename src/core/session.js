@@ -5,6 +5,7 @@
 
 import { createCharacter, refreshDerived, rollAttributes, normalizeCharacter } from './character.js';
 import { createDefaultCharacter } from '../state.js';
+import { fillSkillPoints } from '../services/charGen.js';
 
 /** 设定界面里可选的队友人数 */
 export const TEAMMATE_COUNT_OPTIONS = [0, 1, 2, 3, 4];
@@ -31,48 +32,56 @@ export const MODES = [
 const CHARACTER_POOL = [
   {
     name: '林默',
+    gender: '男',
     occupation: '退伍军医',
     persona: '话少，抽烟，遇到血会下意识先检查伤口。表面冷漠，但会挡在别人前面。',
     skills: ['急救', '医学', '射击：手枪']
   },
   {
     name: '陈叙',
+    gender: '男',
     occupation: '大学讲师',
     persona: '谨慎到近乎胆小，随身带着笔记本。一紧张就开始引经据典。',
     skills: ['图书馆使用', '历史', '神秘学']
   },
   {
     name: '白鹭',
+    gender: '女',
     occupation: '记者',
     persona: '好奇心压过恐惧，永远想再多问一句。擅长套话，也擅长惹麻烦。',
     skills: ['话术', '心理学', '侦查']
   },
   {
     name: '顾长生',
+    gender: '男',
     occupation: '古董商',
     persona: '油滑，见钱眼开，但眼光极毒。真遇到事时意外地靠得住。',
     skills: ['估价', '侦查', '说服']
   },
   {
     name: '周砚',
+    gender: '男',
     occupation: '私家侦探',
     persona: '冷静、寡言，习惯先观察再动手。对谎言有近乎本能的直觉。',
     skills: ['侦查', '心理学', '潜行']
   },
   {
     name: '苏晚',
+    gender: '女',
     occupation: '护士',
     persona: '温柔但固执，见不得有人受伤。害怕时反而会强迫自己冷静下来。',
     skills: ['急救', '医学', '聆听']
   },
   {
     name: '郑野',
+    gender: '男',
     occupation: '码头工人',
     persona: '嗓门大，脾气直，不信鬼神。力气活都归他，脑子活都推给别人。',
     skills: ['格斗：斗殴', '攀爬', '投掷']
   },
   {
     name: '何九',
+    gender: '女',
     occupation: '图书馆员',
     persona: '安静，说话轻，记性好得吓人。知道很多不该知道的书名。',
     skills: ['图书馆使用', '母语', '神秘学']
@@ -99,6 +108,9 @@ export function createTeammate(index = 0, rand = Math.random) {
   const ch = createCharacter({ name: seed.name, isPlayer: false });
   ch.occupation = seed.occupation;
   ch.persona = seed.persona;
+  // 性别必须显式给。早期模板池没有这个字段，生成出来的队友卡性别是空的，
+  // 设定界面和角色卡上都显示成空格子（实测 200/200 全空）。
+  ch.gender = seed.gender || '未注明';
 
   ch.attrs = rollAttributes();
   refreshDerived(ch);
@@ -110,9 +122,27 @@ export function createTeammate(index = 0, rand = Math.random) {
   ch.san.temp = ch.san.max;
   ch.luck.current = ch.attrs.LUCK;
 
+  // 模板里的技能只当「这个角色擅长什么」的提示，具体点数交给 fillSkillPoints。
+  //
+  // 这里原来写的是 `ch.skills[sk] = Math.max(ch.skills[sk] ?? 0, 60)`，
+  // 把 3 项技能硬设成 60 就结束了，剩下的点一个没花：
+  // 实测 200 张队友卡，**200 张职业点有剩余、196 张兴趣点没动过**，
+  // 玩家在游戏设定界面打开队友卡，看到的就是「兴趣点 0/140，剩 140」。
+  // 那种卡上桌基本废——除了模板点名的三项，其余全是初始值。
+  //
+  // 现在改成：先把模板技能抬到一个「看得出来擅长」的基准，再交给
+  // fillSkillPoints 按职业把职业点/兴趣点分配干净。prefer 让模板技能
+  // 在同等条件下优先拿点，既保证职业画像，又不留预算。
+  const prefer = [];
   for (const sk of seed.skills) {
-    ch.skills[sk] = Math.max(ch.skills[sk] ?? 0, 60);
+    // 抬到 60，但不超过 90（留给补点逻辑继续往上加的空间）
+    const base = Math.max(ch.skills[sk] ?? 0, 60);
+    ch.skills[sk] = Math.min(90, base);
+    prefer.push(sk);
   }
+
+  // 闪避恒等于 DEX/2 是这张卡的约定，不让补点逻辑把它抬起来
+  fillSkillPoints(ch, { exclude: ['闪避'], prefer });
 
   return ch;
 }
