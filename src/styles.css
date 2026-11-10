@@ -360,6 +360,19 @@ body::before {
 }
 .msg.teammate .msg-role { color: #6a8f6a; }
 
+/* 队友自主行动：队友 AI 自己决定做的事，比「队友插话」更醒目一点，
+   玩家要能一眼看出这一步是队友自己走的，不是 KP 代演 */
+.msg.teammate-action .bubble {
+  background: #151d18;
+  border-left: 3px solid #4a7a4a;
+  padding: 8px 14px;
+  border-radius: 0 3px 3px 0;
+  color: #c8d6c8;
+  font-size: 13.5px;
+  max-width: 82%;
+}
+.msg.teammate-action .msg-role { color: #7fa87f; font-weight: 600; }
+
 /* NPC 台词：KP 扮演的酒保、警长、老教授等 */
 .msg.npc .bubble {
   background: #14161d;

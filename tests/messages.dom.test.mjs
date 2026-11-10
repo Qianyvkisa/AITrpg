@@ -190,6 +190,41 @@ ok(emptyVisibleBubbles().length === 0, '读档重绘后没有空气泡');
 ok(visibleBubbles().length === 2, '两条有内容的消息可见');
 
 // ---------------------------------------------------------------------------
+console.log('\n== 队友自主行动的气泡 ==');
+// ---------------------------------------------------------------------------
+// 队友自主行动（role = 'teammate-action'）是新增的角色类型。
+// 它必须：① 渲染成可见气泡 ② 标签显示队友名字 ③ 不被当成 hidden 吞掉
+// ④ 和「队友插话」在 class 上能区分开
+reset();
+const ta = renderMessage({
+  id: 'ta1', role: 'teammate-action', name: '郑野', streaming: false,
+  text: '我贴着墙根挪到门边，侧耳听里面的动静。'
+});
+ok(ta && ta.hidden !== true, '队友行动气泡可见');
+const taRole = ta.querySelector('.msg-role');
+ok(taRole && taRole.textContent === '郑野', '角色标签显示队友名字');
+ok(ta.querySelector('.bubble')?.textContent.includes('墙根'), '气泡内容是行动正文');
+ok(emptyVisibleBubbles().length === 0, '队友行动不产生空气泡');
+
+// 没有 name 时要回落到「队友行动」标签，不能显示 role 原文
+reset();
+const ta2 = renderMessage({
+  id: 'ta2', role: 'teammate-action', streaming: false, text: '我留在门外望风。'
+});
+const ta2Role = ta2.querySelector('.msg-role');
+ok(ta2Role && ta2Role.textContent === '队友行动',
+  `缺名字时回落成「队友行动」（实际: ${ta2Role?.textContent}）`);
+ok(ta2.className.includes('teammate-action'), '行动气泡带 teammate-action class');
+
+// 与「队友插话」要能区分开
+reset();
+const chat = renderMessage({
+  id: 'c1', role: 'teammate', name: '林默', streaming: false, text: '这地方让我后背发凉。'
+});
+ok(chat.className.includes('teammate') && !chat.className.includes('teammate-action'),
+  '插话气泡不会被误标成 teammate-action');
+
+// ---------------------------------------------------------------------------
 console.log('\n== 检测器自检（确保上面的断言能抓到真 bug）==');
 // ---------------------------------------------------------------------------
 reset();

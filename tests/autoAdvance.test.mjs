@@ -12,6 +12,7 @@
 
 import {
   AUTO_ADVANCE_MAX_TURNS,
+  DEFAULT_DELAY,
   MIN_DELAY,
   MAX_DELAY,
   autoAdvanceBlocker,
@@ -116,6 +117,39 @@ eq(autoAdvanceBlocker(base({ turns: NaN })), null, 'turns 是 NaN 时按 0 处�
 eq(autoAdvanceBlocker(base({ turns: -5 })), null, 'turns 为负数时按 0 处理');
 
 // ---------------------------------------------------------------------------
+console.log('\n== 上限用的是「连续自动推进轮数」而不是整局轮数 ==');
+
+// 这是真实事故的回归测试：上限原本读 state.turns（整局轮数），
+// 于是一局玩到 200 轮就永久开不了自动推进。现在读 state.autoAdvanceRun。
+const longGame = {
+  mode: 'spectator',
+  autoAdvance: true,
+  turns: 5000,          // 整局已经玩了 5000 轮
+  autoAdvanceRun: 3     // 但连续自动推进只有 3 轮
+};
+eq(
+  autoAdvanceBlocker(readAutoAdvanceState(longGame)),
+  null,
+  '整局轮数再多，只要连续自动推进没超限就能继续'
+);
+eq(
+  readAutoAdvanceState(longGame).turns,
+  3,
+  'readAutoAdvanceState 读的是 autoAdvanceRun，不是 turns'
+);
+eq(
+  autoAdvanceBlocker(readAutoAdvanceState({ mode: 'spectator', autoAdvance: true, autoAdvanceRun: AUTO_ADVANCE_MAX_TURNS })),
+  'max-turns',
+  '连续自动推进达到上限 → max-turns'
+);
+// 缺少 autoAdvanceRun 字段（旧存档）时按 0 处理，不能误判成已到上限
+eq(
+  autoAdvanceBlocker(readAutoAdvanceState({ mode: 'spectator', autoAdvance: true, turns: 9999 })),
+  null,
+  '旧存档没有 autoAdvanceRun 字段时按 0 处理，不误判'
+);
+
+// ---------------------------------------------------------------------------
 console.log('\n== 该不该打扰玩家 ==');
 
 ok(!shouldReportBlocker('off'), '开关关着不提示（玩家自己关的）');
@@ -132,7 +166,10 @@ console.log('\n== 终局 vs 暂时（决定开关要不要关掉）==');
 // 这条区分是自动推进能不能「掷完骰自动接上」的关键：
 // 把 pending-roll 当成终局去关开关，玩家掷完骰就得再手动开一次，很别扭。
 ok(isTerminalBlocker('ended'), 'ended 是终局 → 关掉开关');
-ok(isTerminalBlocker('max-turns'), 'max-turns 是终局 → 关掉开关');
+// max-turns 曾经被当成终局，后果是一局推到上限后**永久**开不了自动推进
+// （toggle 直接拒绝），玩家只能重开游戏。它本质只是防失控的保护，
+// 玩家手动推一次就该能继续，所以现在归到「可恢复」这一类。
+ok(!isTerminalBlocker('max-turns'), 'max-turns 可恢复 → 不关开关（手动推一次即继续）');
 ok(!isTerminalBlocker('pending-roll'), 'pending-roll 只是暂时 → 开关保持开着');
 ok(!isTerminalBlocker('busy'), 'busy 只是暂时 → 开关保持开着');
 ok(!isTerminalBlocker('off'), 'off 不是终局');
@@ -155,29 +192,40 @@ ok(
 // ---------------------------------------------------------------------------
 console.log('\n== 间隔夹取 ==');
 
-eq(clampDelay(2500), 2500, '正常值原样返回');
+eq(clampDelay(2000), 2000, '正常值原样返回');
 eq(clampDelay(1), MIN_DELAY, `过小夹到下限 ${MIN_DELAY}`);
-eq(clampDelay(0), 2500, '0 回落到默认值');
-eq(clampDelay(-100), 2500, '负数回落到默认值');
+eq(clampDelay(0), DEFAULT_DELAY, '0 回落到默认值');
+eq(clampDelay(-100), DEFAULT_DELAY, '负数回落到默认值');
 eq(clampDelay(999999), MAX_DELAY, `过大夹到上限 ${MAX_DELAY}`);
-eq(clampDelay(undefined), 2500, 'undefined 回落默认值');
+eq(clampDelay(undefined), DEFAULT_DELAY, 'undefined 回落默认值');
 eq(clampDelay('3000'), 3000, '字符串数字能解析');
-eq(clampDelay('abc'), 2500, '非数字字符串回落默认值');
-eq(clampDelay(NaN), 2500, 'NaN 回落默认值');
-eq(clampDelay(2500.7), 2501, '小数四舍五入');
+eq(clampDelay('abc'), DEFAULT_DELAY, '非数字字符串回落默认值');
+eq(clampDelay(NaN), DEFAULT_DELAY, 'NaN 回落默认值');
+eq(clampDelay(2000.7), 2001, '小数四舍五入');
 
 // ---------------------------------------------------------------------------
 console.log('\n== 从 state 提取参数 ==');
 
 {
-  const s = { mode: 'spectator', autoAdvance: true, scenario: { ended: false }, turns: 7 };
+  const s = {
+    mode: 'spectator',
+    autoAdvance: true,
+    scenario: { ended: false },
+    turns: 7,            // 整局轮数：不再用作上限
+    autoAdvanceRun: 7    // 连续自动推进轮数：现在读的是这个
+  };
   const r = readAutoAdvanceState(s, { busy: true, pendingRoll: false });
   eq(r.mode, 'spectator', 'mode 正确提取');
   eq(r.autoAdvance, true, 'autoAdvance 正确提取');
   eq(r.busy, true, 'busy 正确提取');
   eq(r.ended, false, 'ended 正确提取');
   eq(r.pendingRoll, false, 'pendingRoll 正确提取');
-  eq(r.turns, 7, 'turns 正确提取');
+  eq(r.turns, 7, 'turns 正确提取（取自 autoAdvanceRun）');
+}
+{
+  // 整局轮数与连续轮数不一致时，必须取连续轮数
+  const r = readAutoAdvanceState({ mode: 'spectator', turns: 300, autoAdvanceRun: 2 });
+  eq(r.turns, 2, '整局 300 轮但连续只有 2 轮 → 取 2（回归：曾误取整局轮数）');
 }
 {
   // scenario 缺失不能抛异常

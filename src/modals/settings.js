@@ -79,6 +79,18 @@ export async function openSettings(state, onChanged) {
         </section>
 
         <section class="field-group">
+          <h3>队友行动方式</h3>
+          <label class="field-check">
+            <input id="cfgTeammateAutonomous" type="checkbox" ${state.teammateAutonomous === false ? '' : 'checked'}>
+            <span>队友由自己的 AI 决定行动（推荐）</span>
+          </label>
+          <em class="hint">
+            开启后，每位队友各自独立思考这一轮要做什么，彼此会有真正的分歧；<br>
+            代价是每位队友每轮多一次 API 调用。关掉则退回旧行为：队友的行动和台词全由 KP 一人代演。
+          </em>
+        </section>
+
+        <section class="field-group">
           <h3>队友自动发言</h3>
           <label class="field-check">
             <input id="cfgAutoTeammate" type="checkbox" ${state.autoTeammate === false ? '' : 'checked'}>
@@ -310,6 +322,7 @@ export async function openSettings(state, onChanged) {
     state.autoTeammate = backdrop.querySelector('#cfgAutoTeammate').checked;
     state.teammateChance =
       (parseInt(backdrop.querySelector('#cfgTeammateChance').value, 10) || 0) / 100;
+    state.teammateAutonomous = backdrop.querySelector('#cfgTeammateAutonomous').checked;
 
     onChanged?.();
     close();

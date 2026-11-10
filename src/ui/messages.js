@@ -19,6 +19,9 @@ const ROLE_LABELS = {
   clue: '线索',
   scene: '场景',
   teammate: '队友',
+  // 队友自主行动：由队友自己的 AI 决定，跟「队友插话」分开显示，
+  // 玩家才分得清哪些是队友自己干的、哪些是 KP 代演的
+  'teammate-action': '队友行动',
   npc: 'NPC'
 };
 

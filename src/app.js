@@ -11,6 +11,7 @@ import { createCharacter } from './core/character.js';
 import { createInitialState, createDefaultCharacter } from './state.js';
 import { buildSnapshot, applySnapshot } from './persistence.js';
 import { generateTeammateLine } from './services/teammate.js';
+import { generateTeammateAction, pickActingTeammates } from './services/teammateAct.js';
 import { renderAll, renderScene, resetPanelCache, applyEditingLock } from './ui/panels.js';
 import {
   renderMessage,
@@ -25,15 +26,7 @@ import {
 import { openSettings, openModules, openCharEditor, openTeammateCreator, openSaves, openGameSetup, openCharLibrary } from './modals/index.js';
 import { hasRunTurn, menuButtonVisibility } from './ui/menu.js';
 import { buildSession } from './core/session.js';
-import {
-  AUTO_ADVANCE_MAX_TURNS,
-  autoAdvanceBlocker,
-  blockerMessage,
-  clampDelay,
-  isTerminalBlocker,
-  readAutoAdvanceState,
-  shouldReportBlocker
-} from './core/autoAdvance.js';
+import { createAutoAdvanceRunner } from './core/autoAdvanceRunner.js';
 import { openingFor } from './core/builtinModules.js';
 const $ = (sel) => document.querySelector(sel);
 
@@ -47,9 +40,13 @@ let busy = false;
 // ---------------------------------------------------------------------------
 /** 显示主界面 */
 function showStartScreen() {
-  // 回主界面一律停掉自动推进：这是最后一道保险。
-  // 即便某个入口漏了 cancel，也不会在玩家看着主界面时后台偷偷发请求。
-  cancelAutoAdvance();
+  // 回主界面一律**停掉**自动推进（不只是取消定时器）。
+  //
+  // 这里原来只调用 cancelAutoAdvance()，开关 autoAdvance 还留着 true：
+  // 玩家再进一局时按钮显示「自动推进 · 开」，但定时器早没了，
+  // 于是又是那个「亮着却不动」的假象。stop(null) 会同时把开关关掉，
+  // 并刷新按钮外观——null 原因不产生系统提示，回主界面时不该多嘴。
+  stopAutoAdvance(null);
   $('#startScreen').hidden = false;
   $('#app').hidden = true;
   // 回到开始界面：重新放开「加队友 / 加调查员」，这时还能调整队伍
@@ -110,26 +107,13 @@ function applyModeToComposer() {
 // 旁观模式本来就要玩家每轮手动点「推进」，一局跑下来点上百次，纯属机械劳动。
 // 这里给一个开关：打开后每轮 KP 叙述完，等一小段阅读时间就自动推进下一轮。
 //
-// 必须处理好的四件事（都是容易出 bug 的地方）：
-//   1) 剧情结束（scenario.ended）→ 立刻停，不能再推进
-//   2) 有待掷骰（pending roll）→ 不推进。虽然旁观模式下队友检定会自动掷，
-//      但玩家角色若存在（比如从玩家模式读档切过来）仍可能产生 pending，
-//      这时推进会让 KP 在骰点未定时编造结果
-//   3) 用户手动点「推进」/「停止」/回主界面 → 取消掉挂起的定时器，
-//      否则会在用户已经离开这个界面后突然发一次请求
-//   4) 上一次请求还在跑（busy）→ 不重复触发
+// 调度逻辑（定时器、开关、恢复）全部放在 core/autoAdvanceRunner.js 里，
+// 那边可以注入假定时器，测试直接覆盖真实实现。这里只做接线：
+// 把 state 与界面能力喂给调度器，再把调度器的动作暴露成界面函数。
+//
+// 曾经踩过的坑：调度逻辑写在 app.js 里时没法被测试直接 import，测试只能
+// 照抄一份，于是「手动推进后定时器再也不重建」的 bug 一路活到了用户手里。
 // ---------------------------------------------------------------------------
-
-/** 挂起的自动推进定时器 id */
-let autoAdvanceTimer = null;
-
-/** 取消挂起的自动推进（幂等） */
-function cancelAutoAdvance() {
-  if (autoAdvanceTimer !== null) {
-    clearTimeout(autoAdvanceTimer);
-    autoAdvanceTimer = null;
-  }
-}
 
 /** 把按钮外观同步成当前开关状态 */
 function syncAutoAdvanceButton() {
@@ -143,89 +127,40 @@ function syncAutoAdvanceButton() {
     : '开启后，每轮 KP 叙述完自动继续推进，不需要手动点「推进」';
 }
 
-/** 取当前状态下「能否推进」的结论（null = 可以） */
-function autoAdvanceBlockerNow() {
-  return autoAdvanceBlocker(
-    readAutoAdvanceState(state, { busy, pendingRoll: hasPendingRoll() })
-  );
+/** 自动推进调度器（engine 尚未创建时不会被调用到，闭包里取实时值） */
+const autoRunner = createAutoAdvanceRunner({
+  getState: () => state,
+  isBusy: () => busy,
+  hasPendingRoll: () => hasPendingRoll(),
+  // 跑一轮：走和手动推进完全相同的路径，只是标记来源
+  runTurn: () => spectatorAdvance({ fromAuto: true }),
+  notify: (text) => engine?.pushMessage({ role: 'system', text }),
+  onChange: () => syncAutoAdvanceButton()
+});
+
+/** 取消挂起的自动推进（幂等） */
+function cancelAutoAdvance() {
+  autoRunner.cancel();
 }
 
 /** 停止自动推进，并把原因告诉玩家（避免「自动推进莫名停了」的困惑） */
 function stopAutoAdvance(reason) {
-  state.autoAdvance = false;
-  cancelAutoAdvance();
-  syncAutoAdvanceButton();
-
-  // 只有终局原因值得留一条消息；pending-roll 走的是「暂停」路径，
-  // 由 spectatorAdvance 自己发提示，不会走到这里。
-  if (isTerminalBlocker(reason)) {
-    const why = blockerMessage(reason, AUTO_ADVANCE_MAX_TURNS);
-    engine?.pushMessage({ role: 'system', text: `【自动推进已停止】${why}。` });
-  }
+  autoRunner.stop(reason);
 }
 
-/**
- * 安排下一次自动推进。
- * 已经在跑或已关闭时是安全的空操作。
- */
+/** 安排下一次自动推进 */
 function scheduleAutoAdvance() {
-  cancelAutoAdvance();
-
-  const blocker = autoAdvanceBlockerNow();
-  if (blocker) {
-    // busy / pending-roll 都是**暂时**状态：等请求跑完、骰子掷完后
-    // resumeAutoAdvanceIfNeeded 会重新接上，这里不能把开关关掉。
-    // ended / max-turns 是终局，才真正停止。
-    if (isTerminalBlocker(blocker)) stopAutoAdvance(blocker);
-    return;
-  }
-
-  const delay = clampDelay(state.autoAdvanceDelay);
-  autoAdvanceTimer = setTimeout(async () => {
-    autoAdvanceTimer = null;
-    // 定时器触发时状态可能已经变了（用户点了停止 / 切回主界面 / 剧情结束）
-    const now = autoAdvanceBlockerNow();
-    if (now) {
-      if (isTerminalBlocker(now)) stopAutoAdvance(now);
-      return;
-    }
-    await spectatorAdvance({ fromAuto: true });
-    // 一轮跑完后再次安排：只要开关还开着、且没被待掷骰挡住就会一直循环
-    if (state.autoAdvance) scheduleAutoAdvance();
-  }, delay);
+  autoRunner.schedule();
 }
 
-/**
- * 若自动推进开着、且当前局面已经可以推进（比如刚掷完骰），就接上。
- * 已经在计时中则不动，避免重置倒计时让玩家等更久。
- */
+/** 若自动推进开着、且当前局面可以推进，就接上 */
 function resumeAutoAdvanceIfNeeded() {
-  if (!state.autoAdvance) return;
-  if (autoAdvanceTimer !== null) return;
-  if (autoAdvanceBlockerNow() !== null) return;
-  scheduleAutoAdvance();
+  autoRunner.resume();
 }
 
 /** 切换自动推进开关 */
 function toggleAutoAdvance() {
-  if (state.mode !== 'spectator') return;
-
-  if (state.autoAdvance) {
-    stopAutoAdvance(null);
-    return;
-  }
-
-  // 开启前先看当前局面能不能推进，避免开了却一动不动
-  const blocker = autoAdvanceBlockerNow();
-  if (blocker && blocker !== 'off') {
-    const why = shouldReportBlocker(blocker) ? blockerMessage(blocker, AUTO_ADVANCE_MAX_TURNS) : '';
-    if (why) alert(`${why}，没法开始自动推进。`);
-    return;
-  }
-
-  state.autoAdvance = true;
-  syncAutoAdvanceButton();
-  scheduleAutoAdvance();
+  autoRunner.toggle();
 }
 
 /** 旁观模式下「推进」：没有输入内容时给 KP 一个默认的推进指令 */
@@ -233,7 +168,12 @@ async function spectatorAdvance(opts = {}) {
   if (busy) return;
 
   // 手动推进时先把挂起的自动推进取消，避免紧接着又触发一次
-  if (!opts.fromAuto) cancelAutoAdvance();
+  if (!opts.fromAuto) {
+    cancelAutoAdvance();
+    // 玩家亲自动手了 = 不是失控空转，连续计数清零。
+    // 这样即使之前撞到 max-turns 暂停，手动推一次就能接着自动跑。
+    autoRunner.resetRunCount();
+  }
 
   const input = $('#input');
   const text = input.value.trim() || '（继续推进剧情，让调查员们继续行动）';
@@ -248,10 +188,18 @@ async function spectatorAdvance(opts = {}) {
     // 只有这一轮真的跑成了才计轮数。KP 连不上时不计，否则轮数会虚增，
     // 而且自动推进会拿着「成功」的信号继续往下跑。
     if (res?.ok === false) {
-      if (opts.fromAuto) stopAutoAdvance(null);
+      // 失败时**不关开关**，只暂停。
+      //
+      // 原来这里是 stopAutoAdvance(null)，结果是上游网关抖一下（502）就让
+      // 自动推进永久停止，玩家得手动重新开启——而 502 往往几秒后就自己好了。
+      // 现在保留开关、只取消定时器，并清掉连续计数：
+      // 玩家手动推一次（或等下一次手动操作）就能接着自动跑。
+      cancelAutoAdvance();
+      autoRunner.resetRunCount();
+      const friendly = res.error || '模型服务暂时不可用';
       engine.pushMessage({
         role: 'system',
-        text: '【自动推进已停止】KP 连接失败，检查模型配置后再继续。'
+        text: `【自动推进已暂停】KP 连接失败：${friendly} 稍后点「推进」即可继续，开关仍保持开启。`
       });
       return;
     }
@@ -260,8 +208,10 @@ async function spectatorAdvance(opts = {}) {
   } catch (e) {
     console.error(e);
     engine.pushMessage({ role: 'system', text: `【错误】${e.message}` });
-    // 自动推进时出错要停下来，否则会带着错误一路空转
-    if (opts.fromAuto) stopAutoAdvance(null);
+    // 异常时同样只暂停、不关开关：异常多是网络抖动或解析问题，
+    // 关掉开关会让玩家以为功能坏了，还得手动重新开。
+    cancelAutoAdvance();
+    autoRunner.resetRunCount();
   } finally {
     btn.disabled = false;
     busy = false;
@@ -275,6 +225,20 @@ async function spectatorAdvance(opts = {}) {
         role: 'system',
         text: '【自动推进已暂停】有检定等你掷骰，掷完会自动继续。'
       });
+    } else {
+      // 关键：每轮结束后统一在这里重新接上自动推进。
+      //
+      // 这里原来**只有**上面那个 pending-roll 分支，于是手动点「推进」时
+      // （spectatorAdvance 开头 cancelAutoAdvance 把定时器清掉）就再也没人
+      // 重建定时器——开关亮着、按钮显示「自动推进 · 开」，却一动不动，
+      // 玩家只能一直手点。这是「自动推进没效果」的真正原因。
+      //
+      // 放在 finally 末尾、且不区分 fromAuto，是为了让两条路径都收敛到这里：
+      //   - 自动推进跑完一轮 → 继续下一轮
+      //   - 玩家手动点了一轮   → 之后自动接管
+      // resumeAutoAdvanceIfNeeded 自带幂等保护（开关关着/定时器已在跑/
+      // 被 busy 或 pending-roll 挡住都直接返回），重复调用是安全的。
+      resumeAutoAdvanceIfNeeded();
     }
   }
 }
@@ -462,6 +426,17 @@ async function init() {
   engine.on(handleEngineEvent);
   // 引擎每轮结束后会让队友自发接话，具体怎么调 LLM 由这里提供
   engine.setTeammateSpeaker(() => teammateSpeak({ fromEngine: true }));
+  // 队友自主行动：引擎决定「什么时候编排」，这里提供「谁要行动、行动内容」
+  engine.setTeammateActor(() => planTeammateActions());
+
+  // 上游网关抖动时主进程会自动重试（502/503/504 等），这里给玩家一句提示。
+  // 没有这个的话，重试期间界面完全没反应，玩家会以为程序卡死了。
+  window.api.onRetry?.(({ attempt, maxRetries }) => {
+    engine?.pushMessage({
+      role: 'system',
+      text: `【连接不稳定】模型服务暂时没响应，正在自动重试（${attempt}/${maxRetries}）…`
+    });
+  });
 
   initMessageScroll();
   bindUI();
@@ -571,8 +546,8 @@ function openSaveDialog() {
     allowSave: hasRunTurn(state),
     getSnapshot: () => buildSnapshot(state),
     onLoad: async (data) => {
-      // 读档换掉整局状态，先停掉自动推进
-      cancelAutoAdvance();
+      // 读档换掉整局状态，先停掉自动推进（stop 会同时关开关 + 刷新按钮）
+      stopAutoAdvance(null);
       applySnapshot(state, data);
       state.autoAdvance = false;
       // 读档后立刻写回自动存档：这样「继续」与当前这一局保持一致，
@@ -608,7 +583,7 @@ function beginGame(cfg) {
   const session = buildSession(cfg);
 
   // 新开一局：上一局的自动推进必须停掉，别让它继续在后台跑
-  cancelAutoAdvance();
+  stopAutoAdvance(null);
 
   resetGameState();
   state.mode = session.mode;
@@ -633,7 +608,7 @@ async function continueGame() {
   if (!auto) { alert('没有找到可继续的进度。'); refreshStartScreen(); return; }
 
   // 读档会换掉整局状态，先把上一局的自动推进停掉
-  cancelAutoAdvance();
+  stopAutoAdvance(null);
   applySnapshot(state, auto);
   // 自动推进是「这一次的观看方式」，不跟着存档走：读档后一律关闭，
   // 否则玩家一读档就被自动推进带着跑，来不及看清局面。
@@ -704,6 +679,63 @@ async function sendAction() {
     btn.disabled = false;
     busy = false;
   }
+}
+
+/**
+ * 编排这一轮有哪些队友自主行动。
+ *
+ * 引擎只管「按返回的列表逐个处理」，这里负责三件事：
+ *   1) 用开关 + 概率决定谁要行动（控制 API 成本）
+ *   2) 逐个调用队友 AI（每人一次独立请求，队友之间才有真分歧）
+ *   3) 把结果整理成引擎要的形状
+ *
+ * 为什么要逐个 await 而不是 Promise.all：
+ * 后行动的队友应该能看到前面队友刚做了什么，才能做出「配合/反对」的反应。
+ * 并发调用的话，每个队友看到的都是同一份旧局面，等于各说各话。
+ */
+async function planTeammateActions() {
+  const acting = pickActingTeammates(state);
+  if (!acting.length) return [];
+
+  // 玩家这一轮刚说了什么：队友要能针对它做反应
+  const lastUser = [...state.messages].reverse().find((m) => m.role === 'user');
+  const playerAction = lastUser?.text || '';
+
+  const plans = [];
+
+  for (const char of acting) {
+    // 前面的队友刚行动过，就提示这位别重复
+    const lastActor = [...state.messages].reverse()
+      .find((m) => m.role === 'teammate-action')?.name;
+
+    const res = await generateTeammateAction(state, window.api, char, {
+      playerAction,
+      lastSpeaker: lastActor
+    });
+
+    if (!res.ok) {
+      // 单个队友失败不该中断整轮：记录一条隐藏提示继续下一位
+      engine.pushMessage({
+        role: 'system',
+        text: `【队友 AI 失败】${char.name}：${res.error}`,
+        hidden: true
+      });
+      continue;
+    }
+
+    plans.push(res);
+
+    // 先把行动落进消息流，后面的队友才能看到（上面 buildRecentContext 读的是 state.messages）
+    engine.pushMessage({
+      role: 'teammate-action',
+      name: res.name,
+      text: res.text
+    });
+  }
+
+  // 这里返回的计划里，text 已经在上面推过消息了。
+  // 为避免引擎重复推送，标记已推送，由引擎跳过推送只做结算。
+  return plans.map((p) => ({ ...p, alreadyPushed: true }));
 }
 
 /** 队友 AI 主动插话 */

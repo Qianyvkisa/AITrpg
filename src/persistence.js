@@ -36,7 +36,8 @@ export function buildSnapshot(state) {
       turns: turnCount(state),
       tone: state.tone,
       autoTeammate: state.autoTeammate,
-      teammateChance: state.teammateChance
+      teammateChance: state.teammateChance,
+      teammateAutonomous: state.teammateAutonomous
     }
   };
 }
@@ -58,6 +59,9 @@ export function applySnapshot(state, snapshot) {
   // 旧存档没有这两个字段，用默认值兜底（保持开启，别让老存档突然变哑巴）
   state.autoTeammate = s.autoTeammate !== false;
   state.teammateChance = Number.isFinite(s.teammateChance) ? s.teammateChance : 0.7;
+  // 队友自主行动同理：老存档没有这个字段时默认开启（这是更好的体验），
+  // 只有明确存了 false 才退回 KP 代演。
+  state.teammateAutonomous = s.teammateAutonomous !== false;
 
   return state;
 }

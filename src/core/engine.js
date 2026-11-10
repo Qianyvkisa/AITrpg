@@ -23,6 +23,9 @@ export class GameEngine {
     this.api = api;       // window.api
     this.listeners = new Set();
     this.requestId = 0;
+    // 上一次 KP 请求失败时主进程给出的「人话」说明（如「模型服务暂时不可用」），
+    // 供界面层拿来提示玩家，而不是甩一段 HTTP 原文。
+    this.lastError = '';
   }
 
   on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
@@ -73,13 +76,20 @@ export class GameEngine {
       teammates,
       companions,
       tone: s.tone,
-      mode: s.mode || 'player'
+      mode: s.mode || 'player',
+      // 自主模式下 KP 不代演队友，提示词要相应改写（否则两边打架）
+      teammateAutonomous: s.teammateAutonomous !== false
     });
 
     const messages = [{ role: 'system', content: sys }];
 
     const recent = s.messages
-      .filter((m) => m.role === 'user' || m.role === 'keeper' || m.role === 'system-result')
+      .filter((m) =>
+        m.role === 'user' || m.role === 'keeper' || m.role === 'system-result' ||
+        // 队友自主行动也要进 KP 的上下文，否则 KP 不知道队友做了什么，
+        // 会自己再编一套队友行动——那正是要消灭的「一人分饰多角」
+        m.role === 'teammate-action'
+      )
       .slice(-HISTORY_LIMIT);
 
     for (const m of recent) {
@@ -92,6 +102,10 @@ export class GameEngine {
         if (keeperText) messages.push({ role: 'assistant', content: keeperText });  // 跳过空占位
       } else if (m.role === 'system-result') {
         if (m.text) messages.push({ role: 'user', content: `[系统] ${m.text}` });
+      } else if (m.role === 'teammate-action') {
+        // 用 user 角色传入，并显式标注「队友行动」。
+        // 若用 assistant，KP 会以为是自己写的，进而以为自己已经代演过队友了。
+        messages.push({ role: 'user', content: `[队友行动] ${m.name}：${m.text}` });
       }
     }
 
@@ -140,13 +154,22 @@ export class GameEngine {
     }
 
     if (!res.ok) {
-      msg.text = res.canceled ? '【已取消】' : `【KP 连接失败】${res.error}`;
+      // 优先用主进程给出的「人话」说明（friendly），它会把 HTTP 502 这类
+      // 网关故障翻译成玩家看得懂的话；没有就退回原始错误。
+      msg.text = res.canceled
+        ? '【已取消】'
+        : `【KP 连接失败】${res.friendly || res.error}`;
       msg.error = true;
+      // 记在实例上，让 takeTurn 能把「人话」一路带到界面层。
+      // 用字段而不是改返回值，是为了不破坏 playerAction 返回 boolean 的既有契约。
+      this.lastError = res.friendly || res.error || '';
       this.emit({ type: 'stream-end', messageId: msg.id });
       // 返回 false 让上层知道「这一轮其实没跑成」。
-      // 自动推进依赖这个信号：API 挂了却当成正常轮次，会一路空转 200 次失败请求。
+      // 自动推进依赖这个信号：API 挂了却当成正常轮次，会一路空转失败请求。
       return false;
     }
+    // 成功了就把上一次的错误清掉，避免后续失败沿用到旧信息
+    this.lastError = '';
 
     msg.text = res.text || msg.text;
     this.emit({ type: 'stream-end', messageId: msg.id });
@@ -255,8 +278,11 @@ export class GameEngine {
   }
 
   /**
-   * 一轮完整交互：玩家行动 → KP 叙述 → 若产生检定则自动续跑叙述结果。
-   * 续跑有次数上限。之后按配置让队友自发接话。
+   * 一轮完整交互。
+   *
+   * 流程（自主模式下）：
+   *   玩家行动 → KP 叙述 → 队友各自决定行动（每人一次独立 LLM 调用）
+   *   → 队友的检定由系统掷骰 → 结果回喂 KP 裁定后果 → 队友补台词
    *
    * 注意：如果产生了「等待玩家掷骰」的检定，本轮到此为止，
    * 不再自动续跑，也不再让队友插话——否则 KP 会在骰点还没掷出时
@@ -270,7 +296,11 @@ export class GameEngine {
     // 有玩家待掷骰：交给界面等玩家点按钮
     if (this.pendingRolls().length) {
       this.emit({ type: 'state-changed' });
-      return { chain: 0, ok: firstOk !== false };
+      return {
+        chain: 0,
+        ok: firstOk !== false,
+        error: firstOk === false ? (this.lastError || '') : ''
+      };
     }
 
     let chain = 0;
@@ -286,10 +316,102 @@ export class GameEngine {
       if (stepOk === false) { ok = false; break; }
     }
 
+    // ---------------------------------------------------------------------
+    // 队友自主行动
+    //
+    // 放在 KP 叙述之后、队友补台词之前：先让队友对**刚发生的局面**做出
+    // 行动决策，再让 KP 裁定后果，最后才是可有可无的插话。
+    //
+    // 顺序不能反：若先插话再行动，队友会先评论一句、再回头去做事，
+    // 读起来像先表态后思考，很不自然。
+    // ---------------------------------------------------------------------
+    if (ok) {
+      const acted = await this.runTeammateActions();
+      if (acted) ok = true;   // 队友行动失败不影响本轮整体成败
+    }
+
     // KP 说完之后，让队友自发接一句，避免整场只有 KP 在输出
     if (ok) await this.autoTeammateChatter();
 
-    return { chain, ok };
+    return { chain, ok, error: ok ? '' : (this.lastError || '') };
+  }
+
+  /**
+   * 让队友自主行动一轮。
+   *
+   * 由外部注入 actor（要调 LLM，引擎不直接依赖 api 细节），
+   * 与 teammateSpeaker 同样的注入思路。
+   *
+   * 每条队友行动的处理顺序：
+   *   1) 记录「[队友行动]」消息（会进 KP 上下文，KP 据此裁定）
+   *   2) 结算它请求的检定（骰点由本地掷，AI 不能编）
+   *   3) 若产生待掷骰，停下来交给界面
+   *
+   * @returns {Promise<boolean>} 是否真的有人行动了
+   */
+  async runTeammateActions() {
+    const s = this.state;
+    const actor = this.teammateActor;
+    if (!actor) return false;
+
+    // 开关 / 概率 / 剧情结束 等判断都在注入的实现里，
+    // 引擎只负责「拿到谁要行动，就编排谁」。
+    let plans;
+    try {
+      plans = await actor();
+    } catch (e) {
+      this.pushMessage({
+        role: 'system',
+        text: `【队友 AI 失败】${e.message}`,
+        hidden: true
+      });
+      return false;
+    }
+
+    if (!Array.isArray(plans) || !plans.length) return false;
+
+    let anyActed = false;
+
+    for (const plan of plans) {
+      if (!plan?.ok) continue;
+
+      // 行动消息通常已由注入方推送过了（因为它要让后续队友看到前面的行动，
+      // 必须边生成边落进消息流）。只有没推过的才在这里补推，避免出现两条一样的。
+      if (!plan.alreadyPushed) {
+        this.pushMessage({
+          role: 'teammate-action',
+          name: plan.name,
+          text: plan.text
+        });
+        s.scenario.events.push(`队友·${plan.name}：${String(plan.text).slice(0, 60)}`);
+      }
+      anyActed = true;
+
+      // 结算它请求的检定。指令里的角色名已在生成阶段补好，
+      // 这里直接复用 directives 的统一结算链路。
+      if (plan.directives?.length) {
+        await this.resolveDirectives(plan.directives);
+      }
+
+      // 出现待玩家掷骰就停下，别继续推进——否则后面的队友行动
+      // 会建立在一个还没掷出的骰点之上
+      if (this.pendingRolls().length) {
+        this.emit({ type: 'state-changed' });
+        break;
+      }
+    }
+
+    // 有队友行动过、且没在等骰，就让 KP 裁定这些行动的后果
+    if (anyActed && !this.pendingRolls().length) {
+      await this.runKeeper();
+    }
+
+    return anyActed;
+  }
+
+  /** 注入队友行动实现（app.js 里绑定，避免引擎直接调 LLM） */
+  setTeammateActor(fn) {
+    this.teammateActor = fn;
   }
 
   /**

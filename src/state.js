@@ -29,11 +29,19 @@ export function createInitialState() {
     // KP 说完后是否让队友 AI 自发接话，以及接话概率
     autoTeammate: true,
     teammateChance: 0.7,
+    // 队友是否「自主行动」：true = 每个队友由各自独立的 AI 决定这一轮做什么
+    // （每个队友多一次 API 调用，行动更真实、彼此会有分歧）；
+    // false = 退回旧行为，队友的行动和台词全由 KP 一人代演。
+    // 默认开：这是更接近真实跑团的体验，也是这个功能存在的理由。
+    teammateAutonomous: true,
     // 旁观模式「自动推进」：开启后每轮 KP 叙述完自动继续推进，不需要手动点按钮。
     // 只在 spectator 模式下有意义（玩家模式要等玩家输入行动，自动推进没有输入源）。
     autoAdvance: false,
     // 自动推进的间隔毫秒数：给玩家留出阅读时间，太快会像刷屏
-    autoAdvanceDelay: 2500,
+    autoAdvanceDelay: 2000,
+    // 「连续」自动推进了多少轮。只用于防失控空转（见 autoAdvance.js 的上限说明），
+    // 玩家任何一次手动推进都会清零。故意不持久化——读档后重新计数。
+    autoAdvanceRun: 0,
     // apiConfig 由主进程 config:get 填充；这里只放渲染层需要的字段
     apiConfig: {
       baseUrl: '',

@@ -13,9 +13,26 @@ const {
   isLocalEndpoint
 } = require('./defaults');
 const { createSseDecoder } = require('./sse');
+const {
+  DEFAULT_MAX_RETRIES,
+  isRetryable,
+  backoffDelay,
+  describeFailure
+} = require('./retry');
 
 /** 进行中的请求：requestId → AbortController */
 const inflight = new Map();
+
+/**
+ * 被玩家取消过的 requestId。
+ *
+ * 为什么不能只靠 inflight 判断：每次尝试结束（成功/失败）都会把 id 从 inflight
+ * 里删掉，所以「不在 inflight 里」既可能是「刚跑完」也可能是「被取消」。
+ * 重试循环要区分这两种情况，否则玩家点了取消，重试还会继续发请求。
+ *
+ * 用一个独立的集合记录，请求彻底结束（成功返回或不再重试）时清掉。
+ */
+const canceled = new Set();
 
 /**
  * 拉取可用模型列表（GET /models）。
@@ -87,7 +104,102 @@ async function chat(payload, hooks = {}) {
 
   const stream = payload.stream !== false;
   const requestId = payload.requestId;
+  const hasId = requestId !== undefined && requestId !== null;
 
+  // 清掉可能残留的取消标记（同一个 requestId 理论上不会复用，但别留脏数据）
+  if (hasId) canceled.delete(requestId);
+
+  // 重试次数：调用方可以指定，默认 2 次（总共最多请求 3 次）
+  const maxRetries = Number.isFinite(payload.maxRetries)
+    ? Math.max(0, Math.floor(payload.maxRetries))
+    : DEFAULT_MAX_RETRIES;
+
+  // 玩家是否已经取消。优先用内部的 canceled 集合（可靠），
+  // 也兼容调用方注入的 isCanceled（测试或别的宿主用）。
+  const isCanceled = () => (hasId && canceled.has(requestId)) || !!hooks.isCanceled?.();
+
+  let lastRes = null;
+
+  try {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      // 重试前先等一会儿（首次不等待）。用可取消的等待，
+      // 否则玩家点了取消还要被这一段退避拖住。
+      if (attempt > 0) {
+        const wait = backoffDelay(attempt);
+        hooks.onRetry?.({ attempt, maxRetries, delayMs: wait, error: lastRes?.error });
+        const ok = await sleep(wait, isCanceled);
+        if (!ok) return { ok: false, canceled: true, error: '请求已取消' };
+      }
+
+      lastRes = await attemptOnce(payload, {
+        target, stream, requestId, hooks
+      });
+
+      if (lastRes.ok) {
+        // 重试过就记一笔，方便排查「偶尔卡一下」的情况
+        if (attempt > 0) lastRes.retried = attempt;
+        return lastRes;
+      }
+
+      // 玩家主动取消：立刻返回，绝不重试
+      if (lastRes.canceled) return lastRes;
+
+      // 不值得重试的错误（密钥错、模型名错等）立刻返回，别浪费玩家时间。
+      // 但同样要附上「人话」说明——401 这类恰恰是最需要告诉玩家去改哪里的。
+      if (!isRetryable(lastRes)) {
+        if (attempt > 0) lastRes.retried = attempt;
+        lastRes.friendly = describeFailure(lastRes, attempt);
+        return lastRes;
+      }
+
+      // 退避等待前再看一眼：玩家可能在这几毫秒里点了取消
+      if (isCanceled()) return { ok: false, canceled: true, error: '请求已取消' };
+
+      // 最后一次也失败了：给一句人话，别把上游那页 HTML 直接糊到界面
+      if (attempt === maxRetries) {
+        lastRes.retried = attempt;
+        lastRes.friendly = describeFailure(lastRes, attempt);
+        return lastRes;
+      }
+    }
+
+    // 兜底：理论上走不到这里（循环内每个分支都 return 了），
+    // 但万一将来改了循环结构，也要保证失败结果一定带 friendly。
+    if (lastRes && !lastRes.ok && !lastRes.canceled && !lastRes.friendly) {
+      lastRes.friendly = describeFailure(lastRes, lastRes.retried || 0);
+    }
+    return lastRes;
+  } finally {
+    // 请求彻底结束，清掉取消标记，避免 canceled 集合无限增长
+    if (hasId) canceled.delete(requestId);
+  }
+}
+
+/**
+ * 可取消的等待。
+ * @returns {Promise<boolean>} false = 等待期间被取消了
+ */
+function sleep(ms, isCanceled) {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve(true), ms);
+    // 每 100ms 检查一次取消标记，避免玩家点了取消还要干等
+    const iv = setInterval(() => {
+      if (isCanceled?.()) {
+        clearTimeout(t);
+        clearInterval(iv);
+        resolve(false);
+      }
+    }, 100);
+    // 正常结束时清掉轮询
+    setTimeout(() => clearInterval(iv), ms + 50);
+  });
+}
+
+/**
+ * 发起一次请求（不含重试）。
+ * 抽出来是为了让 chat() 的重试循环干净，也让「流式只能试一次」的约束集中在这里。
+ */
+async function attemptOnce(payload, { target, stream, requestId, hooks }) {
   const headers = { 'Content-Type': 'application/json' };
   if (target.key) headers.Authorization = `Bearer ${target.key}`;
 
@@ -95,12 +207,16 @@ async function chat(payload, hooks = {}) {
     model: target.model,
     messages: payload.messages,
     temperature: target.temperature ?? 0.8,
-    max_tokens: payload.maxTokens ?? cfg.maxTokens ?? 2048,
+    max_tokens: payload.maxTokens ?? loadConfig().maxTokens ?? 2048,
     stream
   });
 
   const controller = new AbortController();
   if (requestId !== undefined && requestId !== null) inflight.set(requestId, controller);
+
+  // 是否已经往外推过内容。流式一旦推过 chunk 就不能重试，
+  // 否则重试会把前半段重复推一遍，界面上出现两截拼接的乱码。
+  let pushed = false;
 
   try {
     const res = await fetch(buildEndpoint(target.url), {
@@ -113,7 +229,11 @@ async function chat(payload, hooks = {}) {
     if (!res.ok) {
       let detail = '';
       try { detail = (await res.text()).slice(0, 800); } catch (_) { /* ignore */ }
-      return { ok: false, error: `HTTP ${res.status} ${res.statusText}\n${detail}` };
+      return {
+        ok: false,
+        status: res.status,
+        error: `HTTP ${res.status} ${res.statusText}\n${detail}`
+      };
     }
 
     if (!stream) {
@@ -121,9 +241,18 @@ async function chat(payload, hooks = {}) {
       return { ok: true, text: data?.choices?.[0]?.message?.content ?? '' };
     }
 
-    return { ok: true, text: await readStream(res, requestId, hooks.onChunk) };
+    const wrapped = (data) => {
+      pushed = true;
+      hooks.onChunk?.(data);
+    };
+
+    const text = await readStream(res, requestId, wrapped);
+    return { ok: true, text };
   } catch (e) {
     if (e && e.name === 'AbortError') return { ok: false, canceled: true, error: '请求已取消' };
+    // 已经推过内容的中断不能重试（会把界面上那半截重复写一遍），
+    // 标记成 canceled 让上层当作「已取消」处理，不再重试。
+    if (pushed) return { ok: false, canceled: true, error: '流式输出中断' };
     return { ok: false, error: e?.message || String(e) };
   } finally {
     if (requestId !== undefined && requestId !== null) inflight.delete(requestId);
@@ -160,8 +289,17 @@ async function readStream(res, requestId, onChunk) {
 }
 
 function cancel(requestId) {
+  if (requestId === undefined || requestId === null) return false;
+
+  // 先记下取消标记：即使此刻没有 controller（比如正卡在重试退避里），
+  // 重试循环也能看到「玩家不要了」，从而立刻收手。
+  canceled.add(requestId);
+
   const controller = inflight.get(requestId);
-  if (!controller) return false;
+  if (!controller) {
+    // 没有进行中的连接，但可能正在退避等待——标记已经打上，等待会中断
+    return true;
+  }
   try { controller.abort(); } catch (_) { /* ignore */ }
   inflight.delete(requestId);
   return true;
@@ -174,6 +312,13 @@ function registerLlmIpc(getWindow) {
       onChunk: (data) => {
         const win = getWindow();
         if (win && !win.isDestroyed()) win.webContents.send('llm:chunk', data);
+      },
+      // 重试时通知界面，否则玩家会盯着一个「卡住」的界面不知道发生了什么
+      onRetry: (info) => {
+        const win = getWindow();
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('llm:retry', { requestId: payload?.requestId, ...info });
+        }
       }
     })
   );

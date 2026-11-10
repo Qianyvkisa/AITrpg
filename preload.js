@@ -16,6 +16,13 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('llm:chunk', handler);
     return () => ipcRenderer.removeListener('llm:chunk', handler);
   },
+  // 上游网关抖动（502/503/504 等）时主进程会自动重试，
+  // 这里把「正在重试第 n 次」告诉界面，否则玩家只看到界面卡住。
+  onRetry: (cb) => {
+    const handler = (_e, data) => cb(data);
+    ipcRenderer.on('llm:retry', handler);
+    return () => ipcRenderer.removeListener('llm:retry', handler);
+  },
 
   // 存档
   listSaves: () => ipcRenderer.invoke('save:list'),
