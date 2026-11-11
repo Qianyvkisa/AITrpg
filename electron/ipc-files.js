@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 // 存档 / 模组 / 通用键值存储 的 IPC
 // ---------------------------------------------------------------------------
-const { ipcMain, dialog, shell } = require('electron');
+const { ipcMain, dialog, shell, app } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const fs = require('fs');
@@ -361,6 +361,43 @@ function registerStoreIpc() {
 }
 
 // ---------------------------------------------------------------------------
+// 导出文本文件（跑团记录 replay）
+//
+// 走系统保存对话框而不是写死路径：玩家要自己决定存哪，也可能想直接存到
+// 剪辑软件的工作目录里。
+// 默认位置取「下载」目录，文件名由渲染层给（带模组名与日期，避免重复导出覆盖）。
+// ---------------------------------------------------------------------------
+function registerFileIpc(getWindow) {
+  ipcMain.handle('file:saveText', async (_e, { defaultName, content } = {}) => {
+    const win = getWindow();
+    const text = String(content ?? '');
+    if (!text) return { ok: false, error: '内容为空' };
+
+    let target;
+    try {
+      const r = await dialog.showSaveDialog(win, {
+        title: '导出跑团记录',
+        defaultPath: path.join(app.getPath('downloads'), String(defaultName || '跑团记录.txt')),
+        filters: [{ name: '文本文件', extensions: ['txt'] }]
+      });
+      if (r.canceled || !r.filePath) return { ok: false, canceled: true };
+      target = r.filePath;
+    } catch (e) {
+      return { ok: false, error: `打开保存对话框失败：${e.message}` };
+    }
+
+    try {
+      // 显式写 UTF-8（不带 BOM）：带 BOM 时某些编辑器和字幕工具会在
+      // 文件开头多出一个不可见字符。
+      fs.writeFileSync(target, text, { encoding: 'utf8' });
+      return { ok: true, path: target };
+    } catch (e) {
+      return { ok: false, error: `写入失败：${e.message}` };
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // 打开规则书窗口
 //
 // 窗口创建在 electron/window.js 里（那里管窗口生命周期），
@@ -380,5 +417,5 @@ function registerRuleBookWindowIpc(openWindow) {
 
 module.exports = {
   registerSaveIpc, registerModuleIpc, registerStoreIpc, registerCharIpc,
-  registerRuleBookIpc, registerRuleBookWindowIpc
+  registerRuleBookIpc, registerRuleBookWindowIpc, registerFileIpc
 };

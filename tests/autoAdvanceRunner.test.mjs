@@ -323,6 +323,142 @@ console.log('\n== 玩家模式：开关无效 ==');
 }
 
 // ---------------------------------------------------------------------------
+console.log('\n== 失败后自动恢复（502 不该让玩家手动点） ==');
+
+{
+  // 可恢复故障（502）应排重试定时器，而不是停下等玩家
+  const h = makeHarness();
+  h.runner.toggle();
+  h.runner.cancel();               // 清掉正常的推进定时器，模拟一轮刚跑完
+
+  const scheduled = h.runner.recoverAfterFailure(
+    '模型服务暂时不可用（HTTP 502），上游网关故障，通常过一会儿会自己恢复（已自动重试 2 次）。'
+  );
+
+  eq(scheduled, true, '502 判定为可恢复，安排了自动重试');
+  eq(h.pendingTimers(), 1, '排了一个重试定时器');
+  eq(h.state.autoAdvance, true, '开关保持开启（不需要玩家重新打开）');
+  eq(h.runner.failureCount(), 1, '失败计数为 1');
+
+  const ms = [...h.timers.values()][0].ms;
+  eq(ms, 5000, '第一次重试退避 5 秒');
+  ok(ms > DEFAULT_DELAY, '重试间隔比正常推进间隔长（有退避，不是原速猛打）');
+
+  // 提示要说清「不用手动点」，而不是让玩家自己去点
+  const note = h.notes[h.notes.length - 1] || '';
+  ok(/自动重试/.test(note), '提示里说明正在自动重试');
+  ok(!/点「推进」/.test(note), '不再要求玩家手动点推进');
+}
+
+{
+  // 配置类错误（401）不该自动重试：等一百年也一样
+  const h = makeHarness();
+  h.runner.toggle();
+  h.runner.cancel();
+
+  const scheduled = h.runner.recoverAfterFailure(
+    'API Key 无效或没有权限（HTTP 401），请到设置里检查密钥。'
+  );
+
+  eq(scheduled, false, '401 判定为不可恢复，不排重试');
+  eq(h.pendingTimers(), 0, '没有排定时器（避免无意义重试）');
+  eq(h.state.autoAdvance, true, '开关仍保持开启');
+
+  const note = h.notes[h.notes.length - 1] || '';
+  ok(/需要处理/.test(note), '提示玩家这是需要处理的问题');
+}
+
+{
+  // 404 同理
+  const h = makeHarness();
+  h.runner.toggle();
+  h.runner.cancel();
+  const scheduled = h.runner.recoverAfterFailure(
+    '接口地址或模型名不存在（HTTP 404），请到设置里检查 API 地址与模型名。'
+  );
+  eq(scheduled, false, '404 不自动重试');
+  eq(h.pendingTimers(), 0, '404 不排定时器');
+}
+
+{
+  // 连续重试到上限后停止，别无限空转
+  const h = makeHarness();
+  h.runner.toggle();
+  h.runner.cancel();
+
+  const err = '模型服务暂时不可用（HTTP 502），上游网关故障。';
+  let last = null;
+  for (let i = 1; i <= 3; i++) {
+    last = h.runner.recoverAfterFailure(err);
+    eq(last, true, `第 ${i} 次失败仍会重试（未超上限）`);
+  }
+
+  // 第 4 次：已超过 AUTO_RECOVER_MAX(3)，应停止
+  last = h.runner.recoverAfterFailure(err);
+  eq(last, false, '连续失败超过上限后停止重试');
+  eq(h.pendingTimers(), 0, '超过上限后不再排定时器');
+
+  const note = h.notes[h.notes.length - 1] || '';
+  ok(/连续 3 次/.test(note), '提示说明连续失败次数');
+}
+
+{
+  // 成功后失败计数清零，下次故障重新有完整预算
+  const h = makeHarness();
+  h.runner.toggle();
+  h.runner.cancel();
+
+  h.runner.recoverAfterFailure('HTTP 502 网关故障');
+  eq(h.runner.failureCount(), 1, '失败一次后计数为 1');
+
+  h.runner.noteSuccess();
+  eq(h.runner.failureCount(), 0, '成功后计数清零');
+}
+
+{
+  // 退避递增：5s → 10s → 20s，且封顶
+  const h = makeHarness();
+  h.runner.toggle();
+  h.runner.cancel();
+
+  const err = 'HTTP 503 服务不可用';
+  const waits = [];
+  for (let i = 1; i <= 3; i++) {
+    h.runner.recoverAfterFailure(err);
+    waits.push([...h.timers.values()][0].ms);
+    h.runner.cancel();
+  }
+  eq(waits[0], 5000, '第 1 次退避 5s');
+  eq(waits[1], 10000, '第 2 次退避 10s');
+  eq(waits[2], 20000, '第 3 次退避 20s');
+  ok(waits[0] < waits[1] && waits[1] < waits[2], '退避逐次递增');
+}
+
+{
+  // 自动推进没开时，失败不该排重试（玩家手动点的一轮失败，由调用方提示）
+  const h = makeHarness({ autoAdvance: false });
+  const scheduled = h.runner.recoverAfterFailure('HTTP 502');
+  eq(scheduled, false, '开关关着时不安排自动重试');
+  eq(h.pendingTimers(), 0, '不排定时器');
+}
+
+{
+  // 网络类错误也算可恢复
+  const h = makeHarness();
+  h.runner.toggle();
+  h.runner.cancel();
+
+  for (const msg of [
+    '连不上 API 服务器（已自动重试 2 次），检查网络或 API 地址是否正确。',
+    '请求超时（已自动重试 2 次），模型可能太慢或网络不稳。',
+    'HTTP 504 gateway timeout'
+  ]) {
+    h.runner.cancel();
+    eq(h.runner.recoverAfterFailure(msg), true, `「${msg.slice(0, 12)}…」可恢复`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 console.log('\n== 间隔夹取仍然生效 ==');
 
 {

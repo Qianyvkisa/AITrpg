@@ -50,6 +50,13 @@ function isRetryable(res) {
   // 玩家主动取消：绝不能重试，否则取消不掉
   if (res.canceled) return false;
 
+  // 上游把「余额不足 / 欠费 / 密钥无效」包在 502 里返回时，外层状态码是骗人的。
+  // 必须优先看响应体：这类错误重试一百次也是同样结果，只会让玩家多等。
+  const body = String(res.error || '');
+  if (/insufficient_quota|insufficient_balance|quota|余额不足|积分|欠费|invalid_api_key|account_deactivated/i.test(body)) {
+    return false;
+  }
+
   // 有明确状态码时以状态码为准
   if (Number.isFinite(res.status)) {
     return RETRYABLE_STATUS.has(res.status);
@@ -118,6 +125,30 @@ function describeFailure(res, retried = 0) {
 
   const m = err.match(/HTTP\s+(\d{3})/i);
   const status = Number.isFinite(res?.status) ? res.status : (m ? Number(m[1]) : 0);
+
+  // -------------------------------------------------------------------------
+  // 先查响应体里的「真实原因」，别被外层状态码骗了
+  //
+  // 中转网关常把上游的 402/401 统一包装成 502 返回：
+  //   HTTP 502 Bad Gateway
+  //   {"error":{"message":"... Loomy chat HTTP 402: 积分余额不足 ...",
+  //             "code":"all_failed"}}
+  //
+  // 外层看是 502（像是「过会儿会自己好」），真实原因却是欠费——重试一百次
+  // 也不会好。不识别的话，玩家只会看到「网关故障，稍后重试」然后无限重试，
+  // 永远找不到真正该解决的问题。
+  // -------------------------------------------------------------------------
+  if (/insufficient_quota|insufficient_balance|余额不足|积分|欠费/i.test(err)) {
+    return '模型账户余额不足或积分用完了，请到服务商那里充值后再试（账户问题，重试不会恢复）。';
+  }
+  if (/invalid_api_key|incorrect api key|account_deactivated/i.test(err)) {
+    return 'API Key 无效或已被停用，请到设置里重新填写密钥。';
+  }
+
+  // 上游把 402 原样透传（没包成 502）时也走这条
+  if (status === 402) {
+    return '模型账户余额不足或积分用完了，请充值后再试（账户问题，重试不会恢复）。';
+  }
 
   if (status === 502 || status === 503 || status === 504) {
     return `模型服务暂时不可用（HTTP ${status}），上游网关故障，通常过一会儿会自己恢复${suffix}。`;

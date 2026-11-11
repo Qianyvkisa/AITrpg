@@ -208,7 +208,10 @@ async function attemptOnce(payload, { target, stream, requestId, hooks }) {
     messages: payload.messages,
     temperature: target.temperature ?? 0.8,
     max_tokens: payload.maxTokens ?? loadConfig().maxTokens ?? 2048,
-    stream
+    stream,
+    // 让上游在流末尾补一条带 usage 的 chunk，否则拿不到真实 token 消耗。
+    // 这是 OpenAI 兼容接口的标准字段；不支持的服务端会忽略它，不影响请求。
+    ...(stream ? { stream_options: { include_usage: true } } : {})
   });
 
   const controller = new AbortController();
@@ -238,7 +241,11 @@ async function attemptOnce(payload, { target, stream, requestId, hooks }) {
 
     if (!stream) {
       const data = await res.json();
-      return { ok: true, text: data?.choices?.[0]?.message?.content ?? '' };
+      return {
+        ok: true,
+        text: data?.choices?.[0]?.message?.content ?? '',
+        usage: data?.usage ?? null
+      };
     }
 
     const wrapped = (data) => {
@@ -246,8 +253,8 @@ async function attemptOnce(payload, { target, stream, requestId, hooks }) {
       hooks.onChunk?.(data);
     };
 
-    const text = await readStream(res, requestId, wrapped);
-    return { ok: true, text };
+    const { text, usage } = await readStream(res, requestId, wrapped);
+    return { ok: true, text, usage };
   } catch (e) {
     if (e && e.name === 'AbortError') return { ok: false, canceled: true, error: '请求已取消' };
     // 已经推过内容的中断不能重试（会把界面上那半截重复写一遍），
@@ -265,12 +272,19 @@ async function readStream(res, requestId, onChunk) {
   const decoder = new TextDecoder('utf-8');
   const sse = createSseDecoder();
   let full = '';
+  // 流末尾那条 chunk 会带 usage（需请求时带 stream_options.include_usage）。
+  // 这是**唯一**能拿到真实 token 消耗的途径：网关没有余额查询接口，
+  // 只能靠每次响应自报。原来这里只取 delta.content，把 usage 整个丢了，
+  // 于是界面无从显示用量。
+  let usage = null;
 
   const handle = (payloads) => {
     for (const data of payloads) {
       if (data === '[DONE]') continue;
       let obj;
       try { obj = JSON.parse(data); } catch (_) { continue; }  // 不完整分片，忽略
+      // usage 可能挂在任意一条上（多数实现在最后一条），有就记下来
+      if (obj?.usage && typeof obj.usage === 'object') usage = obj.usage;
       const delta = obj?.choices?.[0]?.delta?.content;
       if (!delta) continue;
       full += delta;
@@ -285,7 +299,7 @@ async function readStream(res, requestId, onChunk) {
   }
   handle(sse.flush());
 
-  return full;
+  return { text: full, usage };
 }
 
 function cancel(requestId) {

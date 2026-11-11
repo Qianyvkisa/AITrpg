@@ -50,22 +50,48 @@ export function scrollToBottom({ force = false } = {}) {
   if (!m) return;
   if (!force && !stick) return;
   m.scrollTop = m.scrollHeight;
+  // 滚到底了就等于恢复跟随，按钮也该收起来
+  const btn = document.querySelector('#btnScrollBottom');
+  if (btn) btn.hidden = true;
 }
 
 /**
  * 绑定滚动监听，判断用户是不是还贴着底部。
  * 只需在 init 时调用一次。
+ *
+ * 同时驱动「↓ 最新」按钮：玩家上翻历史时显示，贴回底部时隐藏。
+ * 按钮本身是提示 + 一键回底，不影响自动跟随（跟随逻辑靠 stick 判定，
+ * 玩家在底部时新内容照常自动下滑）。
  */
 export function initMessageScroll() {
   const m = box();
   if (!m) return;
+
+  const btn = document.querySelector('#btnScrollBottom');
+
+  const syncBtn = () => {
+    if (btn) btn.hidden = stick;
+  };
+
   m.addEventListener(
     'scroll',
     () => {
       stick = m.scrollHeight - m.scrollTop - m.clientHeight <= STICK_THRESHOLD;
+      syncBtn();
     },
     { passive: true }
   );
+
+  if (btn) {
+    btn.addEventListener('click', () => {
+      // 点按钮视为「我要看最新的」：强制滚到底并恢复跟随
+      stick = true;
+      scrollToBottom({ force: true });
+      syncBtn();
+    });
+  }
+
+  syncBtn();
 }
 
 /** 一条消息的气泡元素 */
@@ -334,6 +360,9 @@ function flushPending() {
   pending.clear();
   for (const msg of items) writeStreamingBubble(msg);
   scrollToBottom();
+  // 玩家上翻着的时候新内容在底部增长：提示他「下面还有」
+  const btn = document.querySelector('#btnScrollBottom');
+  if (btn) btn.hidden = stick;
 }
 
 /**

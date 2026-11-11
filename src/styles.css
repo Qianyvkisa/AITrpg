@@ -290,6 +290,42 @@ body::before {
 .scene-name { font-family: var(--font-serif); font-size: 13px; color: var(--accent); }
 .turn-counter { margin-left: auto; font-size: 10px; color: var(--ink-faint); font-family: var(--font-mono); }
 
+/* token 用量指示器：跟在轮数右边，克制一点，别抢剧情注意力 */.token-meter {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-family: var(--font-mono);
+  color: var(--ink-faint);
+  padding: 1px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  cursor: default;
+  transition: color .2s, border-color .2s;
+  white-space: nowrap;
+}
+.token-meter .token-icon { font-size: 9px; opacity: .8; }
+/* 用量偏高时变黄，提醒该注意了；很高时变红 */
+.token-meter.warn { color: #c9a25f; border-color: #4a3d22; }
+.token-meter.high { color: #c96a6a; border-color: #4a2a2a; }
+
+/* 「回到最新」浮动按钮：玩家上翻看历史、新内容在下方增长时出现 */
+.scroll-bottom-btn {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  z-index: 5;
+  padding: 5px 14px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--ink);
+  background: #1b1f28;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .45);
+  transition: background .15s, border-color .15s;
+}
+.scroll-bottom-btn:hover { background: #242a35; border-color: #3a4150; }
+
 .messages {
   flex: 1 1 auto;
   overflow-y: auto;

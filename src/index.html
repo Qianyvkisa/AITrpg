@@ -99,9 +99,18 @@
         <span class="scene-label">场景</span>
         <span id="sceneName" class="scene-name">尚未开始</span>
         <span id="turnCounter" class="turn-counter"></span>
+        <span id="tokenMeter" class="token-meter" hidden
+              title="本次会话累计消耗的 token（来自模型每次响应自报的用量）">
+          <span class="token-icon">◈</span>
+          <span id="tokenText">0</span>
+        </span>
       </div>
 
       <div id="messages" class="messages"></div>
+
+      <!-- 上翻看历史时出现：提示「有新的内容」并一键回到底部 -->
+      <button id="btnScrollBottom" class="scroll-bottom-btn" hidden
+              title="回到最新内容">↓ 最新</button>
 
       <div class="composer">
         <textarea id="input" placeholder="你要做什么？（Enter 发送，Shift+Enter 换行）" rows="2"></textarea>
@@ -110,6 +119,7 @@
           <button class="btn ghost" id="btnAuto" title="让队友 AI 主动说一句话">队友插话</button>
           <button class="btn ghost" id="btnAutoAdvance" hidden
                   title="开启后，每轮 KP 叙述完自动继续推进，不需要手动点「推进」">自动推进</button>
+          <button class="btn ghost" id="btnExport" title="导出本次跑团记录为 txt（含对话、行动、投点）">导出记录</button>
         </div>
       </div>
     </section>

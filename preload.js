@@ -57,5 +57,8 @@ contextBridge.exposeInMainWorld('api', {
   openRuleBook: () => ipcRenderer.invoke('rulebook:open'),
   getRuleBookPath: () => ipcRenderer.invoke('rulebook:path'),
   getRuleBookBase64: () => ipcRenderer.invoke('rulebook:base64'),
-  openRuleBookExternal: () => ipcRenderer.invoke('rulebook:openExternal')
+  openRuleBookExternal: () => ipcRenderer.invoke('rulebook:openExternal'),
+
+  // 导出文本（跑团记录等）：弹保存对话框让玩家自己选位置
+  saveTextFile: (payload) => ipcRenderer.invoke('file:saveText', payload)
 });

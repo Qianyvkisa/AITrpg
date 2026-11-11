@@ -18,11 +18,14 @@
 
 import {
   AUTO_ADVANCE_MAX_TURNS,
+  AUTO_RECOVER_MAX,
   autoAdvanceBlocker,
   blockerMessage,
   clampDelay,
   isTerminalBlocker,
-  readAutoAdvanceState
+  isRecoverableFailure,
+  readAutoAdvanceState,
+  recoveryDelay
 } from './autoAdvance.js';
 
 /**
@@ -53,6 +56,8 @@ export function createAutoAdvanceRunner({
   let timerId = null;
   /** 是否正在跑 runTurn，防止并发重入 */
   let running = false;
+  /** 连续失败次数（用于退避与上限）；任何一次成功或手动操作都清零 */
+  let failureCount = 0;
 
   /**
    * 算出当前阻止原因。
@@ -108,6 +113,71 @@ export function createAutoAdvanceRunner({
   function resetRunCount() {
     const st = getState();
     if (st) st.autoAdvanceRun = 0;
+  }
+
+  /**
+   * 一轮失败后的处置：能自动恢复就排重试，不能就暂停等玩家。
+   *
+   * 为什么需要这个方法：
+   *   原来失败分支一律「取消定时器 + 提示『稍后点推进』」，但 502/503 这类
+   *   是上游网关抖一下，几秒后自己就好了。自动推进的意义恰恰是**不用人管**，
+   *   这时候要求玩家手动点一下，等于把功能废掉了——用户看到的就是
+   *   「自动推进没效果，还得我手动按」。
+   *
+   * 分两种情况：
+   *   可恢复故障（502/网络抖动/超时）→ 退避后自动重试，最多 AUTO_RECOVER_MAX 次
+   *   配置错误（401/404/缺 Key）      → 立刻暂停，重试没有意义
+   *
+   * 开关始终不关：恢复后能自己接上，玩家不需要重新打开。
+   *
+   * @param {string} errorText 错误说明（用于判断可恢复性与展示）
+   * @returns {boolean} true = 已安排自动重试；false = 已暂停等玩家
+   */
+  function recoverAfterFailure(errorText) {
+    const st = getState();
+    // 不是自动推进的场景（玩家手动点的一轮失败），交给调用方自己提示
+    if (!st?.autoAdvance || st.mode !== 'spectator') {
+      cancel();
+      return false;
+    }
+
+    failureCount += 1;
+
+    if (!isRecoverableFailure(errorText)) {
+      // 配置类错误：重试一百次也是同样结果，直接暂停并说清原因
+      cancel();
+      failureCount = 0;
+      notify(`【自动推进已暂停】${errorText} 这个问题需要处理一下，修好后点「推进」继续。`);
+      return false;
+    }
+
+    if (failureCount > AUTO_RECOVER_MAX) {
+      // 连续重试到上限仍未成功：上游多半是真挂了，别再空转烧请求
+      cancel();
+      notify(`【自动推进已暂停】连续 ${AUTO_RECOVER_MAX} 次重试都失败：${errorText} `
+        + '先停一会儿，稍后点「推进」继续（开关仍保持开启）。');
+      failureCount = 0;
+      return false;
+    }
+
+    const wait = recoveryDelay(failureCount);
+    const secs = Math.round(wait / 1000);
+    notify(`【正在自动重试 ${failureCount}/${AUTO_RECOVER_MAX}】${errorText} `
+      + `${secs} 秒后自动继续，不用手动点。`);
+
+    cancel();
+    // 这里直接用 setTimer 而不是 schedule()：schedule 会走 blocker 判定，
+    // 而失败后 state 上没有 pending-roll、也不 busy，会被当成「可以推进」
+    // 立刻用正常间隔（2s）触发，退避就失效了。
+    timerId = setTimer(() => {
+      void fire();
+    }, wait);
+    return true;
+  }
+
+  /** 一轮成功后清零失败计数，让下一次故障重新有完整的重试预算 */
+  function noteSuccess() {
+    failureCount = 0;
   }
 
   /**
@@ -233,11 +303,17 @@ export function createAutoAdvanceRunner({
     cancel,
     stop,
     resume,
+    /** 一轮失败后的处置：可恢复就排重试，否则暂停。返回是否已安排重试 */
+    recoverAfterFailure,
+    /** 一轮成功：清零失败计数 */
+    noteSuccess,
     /** 手动推进一次：清零连续计数，让 max-turns 之后也能继续 */
     resetRunCount,
     /** 是否有排程中的定时器（测试用） */
     isTimerPending: () => timerId !== null,
     /** 是否正在跑一轮（测试用） */
-    isRunning: () => running
+    isRunning: () => running,
+    /** 当前连续失败次数（测试用） */
+    failureCount: () => failureCount
   };
 }

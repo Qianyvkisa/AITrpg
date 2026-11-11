@@ -186,6 +186,61 @@ console.log('\n== 完整场景走查 ==');
 }
 
 // ---------------------------------------------------------------------------
+console.log('\n== 网关把 402 包成 502：别被外层状态码骗了 ==');
+
+{
+  // 真实抓到的响应：外层 502，内层是「积分余额不足」的 402。
+  //
+  // 这是最坑的一类：只看状态码会判定「可恢复」，于是无限重试；
+  // 而欠费重试一万次也不会好，玩家只会看到「网关故障，稍后重试」，
+  // 永远不知道要去充值。
+  const real = `HTTP 502 Bad Gateway
+{"error":{"message":"模型 loomy/DeepSeek-V4.1-Flash 及降级目标全部失败：Loomy chat HTTP 402: {\\"error\\":{\\"message\\":\\"积分余额不足，请获取积分后再试\\",\\"type\\":\\"insufficient_quota\\"}}","code":"all_failed"}}`;
+  const res = { ok: false, status: 502, error: real };
+
+  ok(!isRetryable(res), '欠费包在 502 里 → 不重试');
+  const msg = describeFailure(res, 2);
+  ok(/余额不足|积分/.test(msg), '提示说明是余额/积分问题');
+  ok(!/网关故障/.test(msg), '不再误报成网关故障');
+  ok(!/稍后|过一会儿/.test(msg), '不误导玩家「等一会儿就好」');
+  ok(/重试不会恢复/.test(msg), '明确告知重试无用');
+}
+
+{
+  // 英文错误码形式
+  for (const e of [
+    'HTTP 502 Bad Gateway\n{"error":{"type":"insufficient_quota"}}',
+    'HTTP 502\n{"error":{"code":"insufficient_balance"}}',
+    'HTTP 502\n积分不足',
+    'HTTP 502\n账户欠费'
+  ]) {
+    ok(!isRetryable({ ok: false, status: 502, error: e }), `不重试：${e.slice(0, 20)}…`);
+  }
+}
+
+{
+  // 402 原样透传（没被包成 502）
+  const res = { ok: false, status: 402, error: 'HTTP 402 Payment Required' };
+  const msg = describeFailure(res, 0);
+  ok(/余额不足|积分/.test(msg), '402 透传也给出充值提示');
+}
+
+{
+  // 真·网关故障不能被误伤：仍然要重试
+  const res = { ok: false, status: 502, error: 'HTTP 502 Bad Gateway\nupstream connect error' };
+  ok(isRetryable(res), '真 502 仍然重试');
+  const msg = describeFailure(res, 2);
+  ok(/网关故障/.test(msg), '真 502 仍报网关故障');
+  ok(/过一会儿/.test(msg), '真 502 仍提示会自己恢复');
+}
+
+{
+  // Key 无效包在 502 里，同样不该重试
+  const res = { ok: false, status: 502, error: 'HTTP 502\n{"error":{"code":"invalid_api_key"}}' };
+  ok(!isRetryable(res), 'Key 无效包在 502 里 → 不重试');
+}
+
+// ---------------------------------------------------------------------------
 console.log('\n==========================================');
 if (failed === 0) {
   console.log(`通过 ${passed} 项，全部通过`);

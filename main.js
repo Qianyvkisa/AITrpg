@@ -61,7 +61,7 @@ function bootstrap() {
   const { registerLlmIpc } = require('./electron/llm');
   const {
     registerSaveIpc, registerModuleIpc, registerStoreIpc, registerCharIpc,
-    registerRuleBookIpc, registerRuleBookWindowIpc
+    registerRuleBookIpc, registerRuleBookWindowIpc, registerFileIpc
   } = require('./electron/ipc-files');
 
   // 已有实例时再次双击：把它的窗口叫回前台，而不是开新的
@@ -78,6 +78,7 @@ function bootstrap() {
   registerCharIpc();
   registerRuleBookIpc();
   registerRuleBookWindowIpc(openRuleBookWindow);
+  registerFileIpc(getWindow);
 
   crashlog.log('ipc handlers registered');
 

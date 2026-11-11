@@ -12,15 +12,18 @@
 
 import {
   AUTO_ADVANCE_MAX_TURNS,
+  AUTO_RECOVER_MAX,
   DEFAULT_DELAY,
   MIN_DELAY,
   MAX_DELAY,
   autoAdvanceBlocker,
   isTerminalBlocker,
+  isRecoverableFailure,
   shouldReportBlocker,
   blockerMessage,
   clampDelay,
-  readAutoAdvanceState
+  readAutoAdvanceState,
+  recoveryDelay
 } from '../src/core/autoAdvance.js';
 
 let passed = 0, failed = 0;
@@ -272,6 +275,84 @@ console.log('\n== 完整场景走查 ==');
 {
   // 场景：用户中途关掉开关
   eq(autoAdvanceBlocker(base({ autoAdvance: false })), 'off', '用户关掉后不再推进');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n== 故障是否值得自动重试（isRecoverableFailure） ==');
+
+{
+  // 暂时性故障：等一会儿大概率就通，应该自动重试
+  for (const msg of [
+    '模型服务暂时不可用（HTTP 502），上游网关故障，通常过一会儿会自己恢复（已自动重试 2 次）。',
+    '请求太频繁被限流了（HTTP 429），等几十秒再继续。',
+    'HTTP 503 Service Unavailable',
+    'HTTP 504 gateway timeout',
+    '连不上 API 服务器（已自动重试 2 次），检查网络或 API 地址是否正确。',
+    '请求超时（已自动重试 2 次），模型可能太慢或网络不稳。',
+    'fetch failed',
+    'ECONNRESET socket hang up'
+  ]) {
+    ok(isRecoverableFailure(msg), `可恢复：${msg.slice(0, 24)}…`);
+  }
+}
+
+{
+  // 配置类错误：重试一百次也一样，只会让玩家多等
+  for (const msg of [
+    'API Key 无效或没有权限（HTTP 401），请到设置里检查密钥。',
+    '接口地址或模型名不存在（HTTP 404），请到设置里检查 API 地址与模型名。',
+    'HTTP 403 Forbidden',
+    '未配置模型名称',
+    '请先填写 API Key',
+    '未配置 API Key'
+  ]) {
+    ok(!isRecoverableFailure(msg), `不可恢复：${msg.slice(0, 24)}…`);
+  }
+}
+
+{
+  // 未知错误不自动重试：宁可停下让玩家看到，也别无声地反复重试
+  eq(isRecoverableFailure(''), false, '空错误不重试');
+  eq(isRecoverableFailure(null), false, 'null 不重试');
+  eq(isRecoverableFailure(undefined), false, 'undefined 不重试');
+  eq(isRecoverableFailure('某个我完全没见过的奇怪错误'), false, '未知错误不重试');
+}
+
+{
+  // 「HTTP 502」和「API Key」同时出现时，以配置错误为准（先排除）
+  ok(!isRecoverableFailure('HTTP 502 但 API Key 未配置'), '配置错误优先于状态码');
+}
+
+{
+  // 欠费/积分用完被网关包成 502：这是账户问题，重试无用，绝不能判成可恢复。
+  // 真实踩过：外层 502 让程序以为是网关抖动，于是一直自动重试，
+  // 玩家永远看不到「去充值」这个真正该做的事。
+  for (const msg of [
+    '模型账户余额不足或积分用完了，请到服务商那里充值后再试（账户问题，重试不会恢复）。',
+    '模型服务暂时不可用（HTTP 502），但实际原因是 insufficient_quota',
+    'HTTP 502 积分余额不足'
+  ]) {
+    ok(!isRecoverableFailure(msg), `欠费不可恢复：${msg.slice(0, 20)}…`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n== 重试退避（recoveryDelay） ==');
+
+{
+  eq(recoveryDelay(1), 5000, '第 1 次 5 秒');
+  eq(recoveryDelay(2), 10000, '第 2 次 10 秒');
+  eq(recoveryDelay(3), 20000, '第 3 次 20 秒');
+  eq(recoveryDelay(4), 30000, '第 4 次封顶 30 秒');
+  eq(recoveryDelay(99), 30000, '极大值仍封顶 30 秒');
+
+  ok(recoveryDelay(1) > DEFAULT_DELAY, '重试间隔比正常推进间隔长（避免原速猛打）');
+
+  // 非法输入按第 1 次处理，不能返回 NaN 或 0（否则定时器立刻触发）
+  eq(recoveryDelay(0), 5000, '0 按第 1 次处理');
+  eq(recoveryDelay(-5), 5000, '负数按第 1 次处理');
+  eq(recoveryDelay('abc'), 5000, '非数字按第 1 次处理');
+  ok(recoveryDelay(NaN) > 0, 'NaN 也返回正数');
 }
 
 // ---------------------------------------------------------------------------

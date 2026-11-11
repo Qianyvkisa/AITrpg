@@ -338,7 +338,11 @@ export function skillLevels(value) {
 
 /** 角色卡 → 给 AI 看的紧凑文本 */
 export function characterToPrompt(ch, { full = false } = {}) {
-  const a = ch.attrs;
+  // 旁观模式没有玩家角色（state.playerChar === null），调用方可能直接把
+  // null 传进来。原来这里会抛 TypeError 把整轮请求打挂，表现为「跑团突然
+  // 一直报错」——而玩家根本不知道是自己没建卡。返回空串让上层自然跳过。
+  if (!ch || typeof ch !== 'object') return '';
+  const a = ch.attrs || {};
   const attrLine = ATTRS.map((x) => `${x.name}${a[x.key]}`).join(' ');
 
   const skillLine = KEY_SKILLS

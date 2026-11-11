@@ -37,6 +37,34 @@ export const MAX_DELAY = 60000;
 export const DEFAULT_DELAY = 2000;
 
 /**
+ * 可恢复故障的自动重试上限。
+ *
+ * 502/503/504、网络抖动这类是**暂时性**故障，等几秒通常就好，让玩家手动点
+ * 「推进」毫无道理——自动推进的意义就是不用管。但也不能无限重试：上游真的
+ * 挂了的时候，无限重试只会一直烧请求、一直刷提示。
+ *
+ * 取 3 次：配合下面的退避（5s→10s→20s），总共等约 35 秒。网关抖动一般
+ * 几秒就恢复，真挂了的服务 35 秒也够判断出来了。
+ */
+export const AUTO_RECOVER_MAX = 3;
+
+/**
+ * 第 n 次自动重试前要等多久（毫秒）。
+ *
+ * 退避而不是固定间隔：上游已经 502 了，紧接着原速猛打只会雪上加霜。
+ * 5s → 10s → 20s，封顶 30s。
+ *
+ * @param {number} failureCount 连续失败次数（从 1 开始）
+ * @param {object} [opts] { base, cap }
+ */
+export function recoveryDelay(failureCount, opts = {}) {
+  const base = Number.isFinite(opts.base) ? opts.base : 5000;
+  const cap = Number.isFinite(opts.cap) ? opts.cap : 30000;
+  const n = Math.max(1, Math.floor(Number(failureCount) || 1));
+  return Math.min(cap, base * Math.pow(2, n - 1));
+}
+
+/**
  * 判断此刻能否自动推进。
  *
  * @param {object} p
@@ -112,6 +140,50 @@ export function blockerMessage(reason, turns) {
     default:
       return '';
   }
+}
+
+/**
+ * 这次失败是否值得「等一会儿自动重试」。
+ *
+ * 自动推进遇到故障时不该一律停下等玩家——502 这类过几秒就自己好了，
+ * 让人手动点等于把自动推进的意义抵消掉。但也不能什么都重试：
+ *
+ *   值得重试：502/503/504/429/408、网络断开、超时
+ *     → 上游或链路抖了一下，等几秒大概率就通
+ *
+ *   不值得：401/403/404/400、缺 Key、缺模型名
+ *     → 配置错了，等一百年也一样。重试只会让玩家多等，还掩盖真正的问题
+ *       （该去设置里改密钥，而不是盯着转圈）
+ *
+ * 这里按**文案关键词**判断，因为渲染层拿到的是已经翻译好的 friendly 字符串，
+ * 拿不到原始 status。关键词与 electron/retry.js 的 describeFailure 保持对应。
+ *
+ * @param {string} text 错误说明（engine.lastError / res.error）
+ * @returns {boolean}
+ */
+export function isRecoverableFailure(text) {
+  const s = String(text || '');
+  if (!s) return false;
+
+  // 账户问题优先排除：余额不足 / 积分用完 / 密钥失效。
+  //
+  // 这类错误常被中转网关包成 HTTP 502 返回，只看状态码会误判成「过会儿就好」，
+  // 于是无限重试——但欠费重试一万次也不会好，只会让玩家以为程序坏了。
+  // 必须在状态码判断**之前**拦掉。
+  if (/余额不足|积分|欠费|insufficient_quota|insufficient_balance/i.test(s)) return false;
+  if (/invalid_api_key|account_deactivated/i.test(s)) return false;
+
+  // 配置类错误优先排除：文案里同时出现「HTTP 502」和「API Key」时以配置为准
+  // （实际不会同时出现，但排序上先排除更安全）
+  if (/API Key|密钥|没有权限|接口地址|模型名不存在|未配置|未填写/i.test(s)) return false;
+  if (/HTTP\s+(401|402|403|404|400)\b/i.test(s)) return false;
+
+  if (/HTTP\s+(408|429|500|502|503|504)\b/i.test(s)) return true;
+  if (/网关|限流|暂时不可用|暂时没响应|服务不可用|超时/i.test(s)) return true;
+  if (/ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|socket hang up|network|fetch failed|连不上/i.test(s)) return true;
+
+  // 未知错误不自动重试：宁可停下让玩家看到，也别无声地反复重试
+  return false;
 }
 
 /** 把间隔夹到合理区间，非法值回落到默认值 */

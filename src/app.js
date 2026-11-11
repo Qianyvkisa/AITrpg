@@ -28,6 +28,7 @@ import { hasRunTurn, menuButtonVisibility } from './ui/menu.js';
 import { buildSession } from './core/session.js';
 import { createAutoAdvanceRunner } from './core/autoAdvanceRunner.js';
 import { openingFor } from './core/builtinModules.js';
+import { buildReplay, replayFileName } from './core/replay.js';
 const $ = (sel) => document.querySelector(sel);
 
 const state = createInitialState();
@@ -70,8 +71,103 @@ function enterGame() {
   applyModeToComposer();
   // 读档进来时可能还有没掷的骰，要把输入区锁上
   updateRollGate();
+  updateTokenMeter();
   scrollToBottom({ force: true });
   $('#input')?.focus();
+}
+
+// ---------------------------------------------------------------------------
+// token 用量指示器
+//
+// 数据来源是上游每次响应自报的 usage（见 electron/llm.js 的 readStream）——
+// 网关没有余额查询接口，这是唯一能拿到真实消耗的途径。
+//
+// 显示的是**本次会话累计**，不是账户余额：余额查不到，别假装能查。
+// 用「万」为单位，避免跑几百轮后一串长数字把场景栏撑开。
+// ---------------------------------------------------------------------------
+function formatTokens(n) {
+  const v = Number(n) || 0;
+  if (v < 1000) return String(v);
+  if (v < 10000) return (v / 1000).toFixed(1) + 'k';
+  return Math.round(v / 1000) + 'k';
+}
+
+function updateTokenMeter() {
+  const el = $('#tokenMeter');
+  const txt = $('#tokenText');
+  if (!el || !txt) return;
+
+  const u = engine?.usage;
+  if (!u || !u.calls) {
+    // 一次请求都还没成功过：不显示，免得开局就挂着个 0 让人疑惑
+    el.hidden = true;
+    return;
+  }
+
+  el.hidden = false;
+  if (!u.total) {
+    // 上游没给 usage（有些网关不支持 stream_options）：如实说未知
+    txt.textContent = '用量未知';
+    el.classList.remove('warn', 'high');
+    el.title = '这个模型服务没有返回 token 用量，无法统计';
+    return;
+  }
+
+  txt.textContent = formatTokens(u.total);
+
+  // 分级提示：累计越多越该注意（2 万开始变黄，10 万变红）
+  el.classList.toggle('warn', u.total >= 20000 && u.total < 100000);
+  el.classList.toggle('high', u.total >= 100000);
+
+  const last = u.lastTotal ? `\n上一次请求：${u.lastTotal.toLocaleString()} token` : '';
+  el.title = `本次会话累计 ${u.total.toLocaleString()} token`
+    + `\n输入 ${u.prompt.toLocaleString()} / 输出 ${u.completion.toLocaleString()}`
+    + `\n共 ${u.calls} 次请求${last}`;
+}
+
+// ---------------------------------------------------------------------------
+// 导出跑团记录（txt）
+//
+// 导出的是**完整精确记录**（对话、行动、投点、线索），不是给 AI 看的压缩版——
+// 玩家要拿它做 replay，细节不能丢。
+// ---------------------------------------------------------------------------
+async function exportReplay() {
+  if (!state.messages?.length) {
+    alert('还没有跑团记录可以导出。');
+    return;
+  }
+
+  let text;
+  try {
+    text = buildReplay(state);
+  } catch (e) {
+    console.error(e);
+    alert('生成记录失败：' + e.message);
+    return;
+  }
+
+  const name = replayFileName(state);
+
+  // 优先走主进程的保存对话框；没有（比如浏览器调试）就退回下载
+  const save = window.api?.saveTextFile;
+  if (typeof save === 'function') {
+    try {
+      const res = await save({ defaultName: name, content: text });
+      if (res?.ok === false && !res.canceled) alert('保存失败：' + (res.error || '未知错误'));
+      return;
+    } catch (e) {
+      console.error(e);
+      alert('保存失败：' + e.message);
+      return;
+    }
+  }
+
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 /**
@@ -183,39 +279,48 @@ async function spectatorAdvance(opts = {}) {
   busy = true;
   const btn = $('#btnSend');
   btn.disabled = true;
+  // 这一轮是否失败。失败时 finally 里不能无条件 resume：
+  //   - 可恢复故障：recoverAfterFailure 已经排好退避定时器，resume 会被
+  //     它的幂等保护挡住，无害；但配置错误时定时器已被取消，resume 会
+  //     立刻按正常间隔（2s）重排，把「暂停等玩家」变成无限重试。
+  let failed = false;
   try {
     const res = await engine.takeTurn(text);
     // 只有这一轮真的跑成了才计轮数。KP 连不上时不计，否则轮数会虚增，
     // 而且自动推进会拿着「成功」的信号继续往下跑。
     if (res?.ok === false) {
-      // 失败时**不关开关**，只暂停。
+      // 失败时**不关开关**。
       //
       // 原来这里是 stopAutoAdvance(null)，结果是上游网关抖一下（502）就让
       // 自动推进永久停止，玩家得手动重新开启——而 502 往往几秒后就自己好了。
-      // 现在保留开关、只取消定时器，并清掉连续计数：
-      // 玩家手动推一次（或等下一次手动操作）就能接着自动跑。
-      cancelAutoAdvance();
-      autoRunner.resetRunCount();
+      //
+      // 现在进一步区分故障性质（见 autoAdvanceRunner.recoverAfterFailure）：
+      //   可恢复（502/网络抖动/超时）→ 退避后自动重试，不需要玩家插手
+      //   配置错误（401/404/缺 Key）  → 立刻暂停并说清要改哪里
+      //
+      // 这样「自动推进」在网关抖动时真的能自己挺过去，而不是退化成
+      // 「每次抖动都要我手动点一下」。
       const friendly = res.error || '模型服务暂时不可用';
-      engine.pushMessage({
-        role: 'system',
-        text: `【自动推进已暂停】KP 连接失败：${friendly} 稍后点「推进」即可继续，开关仍保持开启。`
-      });
+      failed = true;
+      autoRunner.recoverAfterFailure(friendly);
       return;
     }
+    // 这一轮成功：清零失败计数，下次故障重新有完整的重试预算
+    autoRunner.noteSuccess();
     state.turns = (state.turns || 0) + 1;
     await autoSave();
   } catch (e) {
     console.error(e);
     engine.pushMessage({ role: 'system', text: `【错误】${e.message}` });
-    // 异常时同样只暂停、不关开关：异常多是网络抖动或解析问题，
-    // 关掉开关会让玩家以为功能坏了，还得手动重新开。
-    cancelAutoAdvance();
-    autoRunner.resetRunCount();
+    // 异常同样走恢复流程：网络类异常能自动重试，别的就暂停等玩家。
+    failed = true;
+    autoRunner.recoverAfterFailure(e?.message || String(e));
   } finally {
     btn.disabled = false;
     busy = false;
     updateRollGate();
+    // 每轮结束刷新 token 指示器：引擎在 runKeeper 里累计了本次请求的用量
+    updateTokenMeter();
     // 这一轮若产生了待掷骰，自动推进要**暂停**（不是关闭）：
     // 开关保持开着，玩家掷完骰后 resumeAutoAdvanceIfNeeded 会把它接上。
     // 这里只给一句提示，让玩家知道在等自己掷骰。
@@ -225,7 +330,7 @@ async function spectatorAdvance(opts = {}) {
         role: 'system',
         text: '【自动推进已暂停】有检定等你掷骰，掷完会自动继续。'
       });
-    } else {
+    } else if (!failed) {
       // 关键：每轮结束后统一在这里重新接上自动推进。
       //
       // 这里原来**只有**上面那个 pending-roll 分支，于是手动点「推进」时
@@ -238,6 +343,10 @@ async function spectatorAdvance(opts = {}) {
       //   - 玩家手动点了一轮   → 之后自动接管
       // resumeAutoAdvanceIfNeeded 自带幂等保护（开关关着/定时器已在跑/
       // 被 busy 或 pending-roll 挡住都直接返回），重复调用是安全的。
+      //
+      // 失败时**跳过**：定时器该由 recoverAfterFailure 决定（退避重试
+      // 或彻底暂停），这里无条件 resume 会把退避覆盖成 2 秒、把暂停
+      // 变成无限重试。
       resumeAutoAdvanceIfNeeded();
     }
   }
@@ -504,6 +613,10 @@ function bindUI() {
   const autoAdvanceBtn = $('#btnAutoAdvance');
   if (autoAdvanceBtn) autoAdvanceBtn.onclick = toggleAutoAdvance;
 
+  // 导出跑团记录为 txt（做 replay 用）
+  const exportBtn = $('#btnExport');
+  if (exportBtn) exportBtn.onclick = exportReplay;
+
   // 掷骰按钮：用事件委托，避免每渲染一条待掷骰消息就重新绑一次
   const messagesBox = $('#messages');
   if (messagesBox) {
@@ -678,6 +791,7 @@ async function sendAction() {
   } finally {
     btn.disabled = false;
     busy = false;
+    updateTokenMeter();
   }
 }
 

@@ -10,11 +10,18 @@ import { parseDirectives, splitNarration } from './protocol.js';
 import { keeperSystemPrompt } from './prompts.js';
 import { characterToPrompt } from './character.js';
 import { getHandler, summarizeResults, rollPending } from './directives.js';
+import { compactHistory, DEFAULT_HISTORY_BUDGET } from './contextBudget.js';
 
 /** 单轮最多自动续跑几次，防止 AI 反复请求检定导致无限循环 */
 const MAX_CHAIN = 3;
 
-/** 喂给 KP 的历史消息条数上限，控制 token 消耗 */
+/**
+ * 喂给 KP 的历史消息条数上限。
+ *
+ * 这是**第一道**闸门（按条数），第二道是按 token 预算压缩（contextBudget.js）。
+ * 两道都要：条数限制防单条超长，token 预算防多条累积超限。
+ * 24 条在正常叙述长度下远低于预算，只有超长回复才会触发压缩。
+ */
 const HISTORY_LIMIT = 24;
 
 export class GameEngine {
@@ -26,11 +33,46 @@ export class GameEngine {
     // 上一次 KP 请求失败时主进程给出的「人话」说明（如「模型服务暂时不可用」），
     // 供界面层拿来提示玩家，而不是甩一段 HTTP 原文。
     this.lastError = '';
+    // 历史部分的 token 预算。超过就压缩（见 contextBudget.js）。
+    this.historyBudget = DEFAULT_HISTORY_BUDGET;
+    // 上一次构建上下文时的压缩统计，界面拿它显示「省了多少 token」
+    this.lastCompactStats = null;
+    // 累计 token 用量（来自上游每次响应自报的 usage）
+    this.usage = { prompt: 0, completion: 0, total: 0, calls: 0, lastTotal: 0 };
   }
 
   on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
 
   emit(event) { for (const fn of this.listeners) fn(event); }
+
+  /**
+   * 累计一次请求的 token 用量。
+   *
+   * usage 来自上游流末尾自报（prompt_tokens / completion_tokens / total_tokens）。
+   * 不是所有网关都会给——不支持时 usage 为 null，这里就只把 calls 加一，
+   * 界面会显示「用量未知」而不是假装 0。
+   */
+  recordUsage(usage) {
+    if (!this.usage) this.usage = { prompt: 0, completion: 0, total: 0, calls: 0, lastTotal: 0 };
+    this.usage.calls += 1;
+
+    if (!usage || typeof usage !== 'object') return this.usage;
+
+    const p = Number(usage.prompt_tokens) || 0;
+    const c = Number(usage.completion_tokens) || 0;
+    const t = Number(usage.total_tokens) || (p + c);
+
+    this.usage.prompt += p;
+    this.usage.completion += c;
+    this.usage.total += t;
+    this.usage.lastTotal = t;
+    return this.usage;
+  }
+
+  /** 重置累计用量（开新局时调用） */
+  resetUsage() {
+    this.usage = { prompt: 0, completion: 0, total: 0, calls: 0, lastTotal: 0 };
+  }
 
   // -------------------------------------------------------------------------
   // 消息日志
@@ -96,20 +138,42 @@ export class GameEngine {
       // 历史 KP 消息用 clean 版本（去掉指令），否则 AI 会以为指令还没结算
       const keeperText = m.clean ?? m.text ?? '';
 
+      // _src 指回原始消息：压缩模块要按角色做摘要（检定要知道是谁掷的什么），
+      // 只靠 OpenAI 格式的 role/content 分不清「队友行动」和「玩家输入」。
+      // 这个字段不会被发给上游（发之前会剥掉，见 compactHistory 的调用处）。
       if (m.role === 'user') {
-        if (m.text) messages.push({ role: 'user', content: m.text });
+        if (m.text) messages.push({ role: 'user', content: m.text, _src: m });
       } else if (m.role === 'keeper') {
-        if (keeperText) messages.push({ role: 'assistant', content: keeperText });  // 跳过空占位
+        if (keeperText) messages.push({ role: 'assistant', content: keeperText, _src: m });  // 跳过空占位
       } else if (m.role === 'system-result') {
-        if (m.text) messages.push({ role: 'user', content: `[系统] ${m.text}` });
+        if (m.text) messages.push({ role: 'user', content: `[系统] ${m.text}`, _src: m });
       } else if (m.role === 'teammate-action') {
         // 用 user 角色传入，并显式标注「队友行动」。
         // 若用 assistant，KP 会以为是自己写的，进而以为自己已经代演过队友了。
-        messages.push({ role: 'user', content: `[队友行动] ${m.name}：${m.text}` });
+        messages.push({ role: 'user', content: `[队友行动] ${m.name}：${m.text}`, _src: m });
       }
     }
 
-    return messages;
+    // -------------------------------------------------------------------
+    // 上下文压缩：存档是精确的，但喂给 AI 的这份要提炼
+    //
+    // 跑团几百轮后历史会占满窗口，既烧 token 又干扰模型对当前局势的判断。
+    // 压缩策略见 contextBudget.js：先滤噪音，再把远端历史折成「前情提要」，
+    // 最后才按预算丢最早的。
+    //
+    // 注意 system prompt（含模组与线索）在 messages[0]，**不参与压缩**——
+    // 线索和场景是模型推进剧情的依据，压掉就会开始编。
+    // -------------------------------------------------------------------
+    const sysMsg = messages.shift();
+    const { messages: compacted, stats } = compactHistory(messages, {
+      budget: this.historyBudget
+    });
+    this.lastCompactStats = stats;
+
+    // 剥掉 _src：这是本地用的引用，不该发到上游（多传字段有些服务端会报错）
+    for (const m of compacted) delete m._src;
+
+    return [sysMsg, ...compacted];
   }
 
   // -------------------------------------------------------------------------
@@ -170,6 +234,10 @@ export class GameEngine {
     }
     // 成功了就把上一次的错误清掉，避免后续失败沿用到旧信息
     this.lastError = '';
+
+    // 累计 token 用量。上游在流末尾自报 usage（见 llm.js readStream），
+    // 这是唯一能拿到真实消耗的途径——网关没有余额查询接口。
+    this.recordUsage(res.usage);
 
     msg.text = res.text || msg.text;
     this.emit({ type: 'stream-end', messageId: msg.id });
