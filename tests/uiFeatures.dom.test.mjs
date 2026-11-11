@@ -65,6 +65,32 @@ class El {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 模拟真实浏览器的 scrollTop 夹值行为
+//
+// scrollToBottom() 为了省掉一次强制同步布局，写的是 1e9 这种必然超限的值，
+// 靠浏览器夹到 scrollHeight - clientHeight。桩必须还原这个语义，
+// 否则测的是「桩没夹值」而不是真实行为。
+// ---------------------------------------------------------------------------
+Object.defineProperty(El.prototype, 'scrollTop', {
+  get() { return this._scrollTop ?? 0; },
+  set(v) {
+    const max = Math.max(0, (this._scrollHeight ?? 0) - (this._clientHeight ?? 0));
+    this._scrollTop = Math.max(0, Math.min(v, max));
+  },
+  configurable: true
+});
+Object.defineProperty(El.prototype, 'scrollHeight', {
+  get() { return this._scrollHeight ?? 0; },
+  set(v) { this._scrollHeight = v; },
+  configurable: true
+});
+Object.defineProperty(El.prototype, 'clientHeight', {
+  get() { return this._clientHeight ?? 0; },
+  set(v) { this._clientHeight = v; },
+  configurable: true
+});
+
 // 全局 document 桩：让 messages.js 能拿到 #messages 与 #btnScrollBottom
 const els = {
   '#messages': new El('div'),
@@ -122,7 +148,8 @@ console.log('\n== 「↓ 最新」按钮：点击回到底部 ==');
   // 点按钮
   btn._handlers.click?.();
 
-  eq(m.scrollTop, m.scrollHeight, '点击后滚到底部');
+  // 真实最大值是 scrollHeight - clientHeight（滚到底时底部与容器底对齐）
+  eq(m.scrollTop, m.scrollHeight - m.clientHeight, '点击后滚到底部');
   ok(btn.hidden, '点击后按钮隐藏（已回底）');
 }
 
@@ -139,7 +166,7 @@ console.log('\n== 自动跟随：贴底时自动下滑 ==');
   m.scrollHeight = 1500;
   scrollToBottom();
 
-  eq(m.scrollTop, 1500, '新内容到达后自动滚到新的底部');
+  eq(m.scrollTop, 1500 - m.clientHeight, '新内容到达后自动滚到新的底部');
 }
 
 // ---------------------------------------------------------------------------
@@ -170,7 +197,7 @@ console.log('\n== 强制滚动（读档/进游戏）无视上翻 ==');
 
   scrollToBottom({ force: true });
 
-  eq(m.scrollTop, 2000, 'force=true 时无视 stick 直接到底');
+  eq(m.scrollTop, 2000 - m.clientHeight, 'force=true 时无视 stick 直接到底');
 }
 
 // ---------------------------------------------------------------------------

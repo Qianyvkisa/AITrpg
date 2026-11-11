@@ -16,6 +16,7 @@ import { renderAll, renderScene, resetPanelCache, applyEditingLock } from './ui/
 import {
   renderMessage,
   renderAllMessages,
+  showEarlier,
   scrollToBottom,
   initMessageScroll,
   scheduleStreamUpdate,
@@ -409,6 +410,28 @@ function resetGameState() {
 // ---------------------------------------------------------------------------
 // 引擎事件 → 界面
 // ---------------------------------------------------------------------------
+
+/**
+ * 找流式中的那条消息。
+ *
+ * 流式 chunk 一秒能来几十次，而 state.messages 在长局里上万条。
+ * 用 find() 每次都从头线性扫描，纯属浪费——流式消息永远是最后一条
+ * （偶尔是倒数几条），从末尾往前找几步就命中了。
+ */
+function findStreamingMessage(id) {
+  const list = state.messages;
+  if (!Array.isArray(list) || !list.length) return null;
+
+  // 从末尾往前看几条：流式消息一定在尾部（可能被队友行动等消息挤后几位）
+  const from = Math.max(0, list.length - 8);
+  for (let i = list.length - 1; i >= from; i--) {
+    if (list[i]?.id === id) return list[i];
+  }
+
+  // 极少数情况（比如读档后重放）不在尾部，才退回全量查找
+  return list.find((m) => m.id === id) || null;
+}
+
 function handleEngineEvent(ev) {
   switch (ev.type) {
     case 'message':
@@ -418,7 +441,7 @@ function handleEngineEvent(ev) {
 
     case 'stream-chunk': {
       // 合帧渲染：chunk 再密也只在每帧写一次 DOM
-      const msg = state.messages.find((m) => m.id === ev.messageId);
+      const msg = findStreamingMessage(ev.messageId);
       if (msg) scheduleStreamUpdate(msg);
       break;
     }
@@ -616,6 +639,10 @@ function bindUI() {
   // 导出跑团记录为 txt（做 replay 用）
   const exportBtn = $('#btnExport');
   if (exportBtn) exportBtn.onclick = exportReplay;
+
+  // 加载更早的记录（长局只渲染最近若干条，往前翻时用）
+  const earlierBtn = $('#btnEarlier');
+  if (earlierBtn) earlierBtn.onclick = () => showEarlier();
 
   // 掷骰按钮：用事件委托，避免每渲染一条待掷骰消息就重新绑一次
   const messagesBox = $('#messages');

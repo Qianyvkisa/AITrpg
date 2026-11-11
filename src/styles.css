@@ -326,6 +326,25 @@ body::before {
 }
 .scroll-bottom-btn:hover { background: #242a35; border-color: #3a4150; }
 
+/* 「更早的记录」：贴在消息区顶部，往上翻时加载更早的消息 */
+.earlier-btn {
+  position: absolute;
+  left: 50%;
+  top: 42px;
+  transform: translateX(-50%);
+  z-index: 5;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--ink-faint);
+  background: #16191f;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.earlier-btn:hover { color: var(--ink); border-color: #3a4150; }
+
 .messages {
   flex: 1 1 auto;
   overflow-y: auto;
@@ -334,10 +353,28 @@ body::before {
   flex-direction: column;
   gap: 16px;
   overscroll-behavior: contain;
+
+  /* ---- 长局性能 ---- */
+  /* 屏外的消息不参与渲染：滚到哪才画哪。
+     长局 DOM 上万节点时，这条能把每帧绘制量压下来一大截。 */
+  content-visibility: auto;
+  /* 给屏外元素一个估算高度，避免滚动条长度剧烈跳动。
+     估不准只是滚动条略抖，不影响正确性。 */
+  contain-intrinsic-size: auto 100px;
+
+  /* 内容上方插入时保持视觉位置稳定，配合「加载更早记录」的滚动补偿 */
+  overflow-anchor: auto;
 }
 
 /* 消息通用 */
-.msg { display: flex; flex-direction: column; gap: 4px; }
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* 单条消息内部的重排不外溢到整页：
+     流式时只有最后一条在变，其余上万条不该跟着重算布局 */
+  contain: layout style;
+}
 
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(6px); }
@@ -345,6 +382,13 @@ body::before {
 }
 
 .msg.enter { animation: fade-up .25s ease; }
+
+/* 长局里连续滚动的性能开关：
+   消息超过一定数量时，app.js 会给 #messages 加 .long-log 类，
+   关掉入场动画与光标以外的动画。
+   为什么不在 CSS 里直接禁用：正常长度的局里入场动画是观感的一部分，
+   只有长局（动画代价盖过收益）才该关。 */
+#messages.long-log .msg.enter { animation: none; }
 
 .msg-role {
   font-size: 9px; letter-spacing: 2px; text-transform: uppercase;

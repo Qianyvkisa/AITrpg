@@ -28,6 +28,33 @@ const ROLE_LABELS = {
 /** 距底部多少像素内算「贴着底部」，超过就算用户在翻历史 */
 const STICK_THRESHOLD = 48;
 
+// ---------------------------------------------------------------------------
+// 渲染窗口：只把最近若干条消息放进 DOM
+//
+// 为什么必须这么做（这是长局卡顿的根因）：
+//   一局跑上几百轮后消息能到一万条（实测 10614 条、约 3.3 万个 DOM 节点、
+//   125 万字）。全部挂在 DOM 里时，任何一次布局/重排都要遍历整棵树——
+//   而流式输出每帧都在改 DOM 并强制滚动，于是每帧都要重排三万个节点，
+//   帧率直接掉到个位数。
+//
+// 只渲染最近 WINDOW 条，DOM 规模恒定，帧率与局长度无关。
+// 更早的消息不是丢了——它们还在 state.messages 里（存档、导出、压缩都读它），
+// 只是不进 DOM。界面上用「更早的记录」按钮往回翻，见 showEarlier()。
+// ---------------------------------------------------------------------------
+const RENDER_WINDOW = 200;
+
+/** 再往前加载多少条（点「更早的记录」时用） */
+const LOAD_STEP = 200;
+
+/** 当前渲染窗口的起始下标（对应 state.messages），0 表示已到头 */
+let windowStart = 0;
+
+/** 渲染窗口对应的消息数组，供 showEarlier 判断还有没有更早的 */
+let windowSource = null;
+
+/** 一次性渲染（读档）时不播放入场动画：上千条同时动画会卡死 */
+let suppressEnterAnim = false;
+
 let boxCache = null;
 let stick = true;
 
@@ -45,14 +72,32 @@ export function findMsgEl(id) {
  * 滚到底部。
  * @param {{force?: boolean}} opts force=true 时无视用户当前滚动位置（读档 / 进游戏时用）
  */
+/**
+ * 滚到底部。
+ *
+ * 性能要点：读 scrollHeight 会强制浏览器同步布局（layout thrashing）。
+ * 流式输出每帧都会调到这里，如果每次都读 scrollHeight 再写 scrollTop，
+ * 就变成「读-写-读-写」交替，每帧都要重排一次。长局里 DOM 大，这一下
+ * 就是几十毫秒。
+ *
+ * 这里用 CSS 的 `overflow-anchor` + 只在「本来贴底」时才写 scrollTop，
+ * 并且用一个大到必然到底的值（1e9）代替 scrollHeight，省掉那次读取。
+ * 浏览器会把超出的值自动夹到真实最大值。
+ *
+ * @param {{force?: boolean}} opts force=true 时无视用户当前滚动位置（读档 / 进游戏时用）
+ */
 export function scrollToBottom({ force = false } = {}) {
   const m = box();
   if (!m) return;
   if (!force && !stick) return;
-  m.scrollTop = m.scrollHeight;
+
+  // 写一个必然超过最大值的数，浏览器自动夹到 scrollHeight。
+  // 这样不必读 scrollHeight，避免强制同步布局。
+  m.scrollTop = 1e9;
+
   // 滚到底了就等于恢复跟随，按钮也该收起来
   const btn = document.querySelector('#btnScrollBottom');
-  if (btn) btn.hidden = true;
+  if (btn && !btn.hidden) btn.hidden = true;
 }
 
 /**
@@ -94,9 +139,16 @@ export function initMessageScroll() {
   syncBtn();
 }
 
-/** 一条消息的气泡元素 */
-export function renderMessage(msg) {
+/**
+ * 一条消息的气泡元素。
+ * @param {object} msg
+ * @param {{parent?: Element}} [opts] parent 指定插入位置（默认追加到 #messages）。
+ *   往前加载更早记录时要插到顶部，用 DocumentFragment 承接更高效。
+ */
+export function renderMessage(msg, opts = {}) {
   if (msg.hidden) return null;
+
+  const parent = opts.parent || null;
 
   // 流式消息登记内容，供 endStreamingBubble 做最后一次重绘
   if (msg.streaming) lastKnown.set(msg.id, msg);
@@ -107,14 +159,15 @@ export function renderMessage(msg) {
   if (msg.role === 'keeper') {
     const segs = msg.segments?.length ? msg.segments : splitNarration(msg.text || '');
     if (segs.some((s) => s.kind === 'say')) {
-      return renderKeeperWithSays(msg, segs);
+      return renderKeeperWithSays(msg, segs, parent);
     }
   }
 
   const wrap = document.createElement('div');
   wrap.className = `msg ${msg.role}`;
   // 流式消息不加入场动画：它的内容每帧都在变，动画会反复重放
-  if (!msg.streaming) wrap.classList.add('enter');
+  // suppressEnterAnim 期间（批量重建）也不加：上千条同时动画会卡死
+  if (!msg.streaming && !suppressEnterAnim) wrap.classList.add('enter');
   wrap.dataset.msgId = msg.id;
 
   // 骰点结果按成功等级着色
@@ -178,7 +231,7 @@ export function renderMessage(msg) {
     wrap.appendChild(bar);
   }
 
-  box()?.appendChild(wrap);
+  (parent || box())?.appendChild(wrap);
   return wrap;
 }
 
@@ -189,7 +242,7 @@ export function renderMessage(msg) {
  * 后面的片段用各自的说话人名字，避免满屏都是「守密人」。
  * 流式期间只有最后一段挂光标。
  */
-function renderKeeperWithSays(msg, segs) {
+function renderKeeperWithSays(msg, segs, parent = null) {
   const anchor = document.createElement('div');
   anchor.className = 'msg-group';
   anchor.dataset.msgId = msg.id;
@@ -229,17 +282,109 @@ function renderKeeperWithSays(msg, segs) {
     anchor.appendChild(wrap);
   });
 
-  box()?.appendChild(anchor);
+  (parent || box())?.appendChild(anchor);
   return anchor;
 }
 
-/** 清空并重建整个消息流（读档 / 进游戏时用） */
+/**
+ * 清空并重建整个消息流（读档 / 进游戏时用）。
+ *
+ * 只渲染最近 RENDER_WINDOW 条：长局里上万条消息全塞进 DOM 会让
+ * 每一次重排都遍历三万个节点，界面直接卡死（见文件顶部说明）。
+ * 更早的内容仍在 state.messages 里，可点「更早的记录」往回翻。
+ */
 export function renderAllMessages(messages) {
   const m = box();
   if (!m) return;
+
+  const list = Array.isArray(messages) ? messages : [];
+  windowSource = list;
+  windowStart = Math.max(0, list.length - RENDER_WINDOW);
+
   m.innerHTML = '';
-  for (const msg of messages) renderMessage(msg);
+
+  // 批量构建时关掉入场动画：上千条同时播 fade-up 会占满主线程
+  suppressEnterAnim = true;
+  try {
+    for (let i = windowStart; i < list.length; i++) renderMessage(list[i]);
+  } finally {
+    suppressEnterAnim = false;
+  }
+
+  updateEarlierButton();
+  syncPerfClass();
   scrollToBottom({ force: true });
+}
+
+/**
+ * 按局面长度切换性能模式。
+ *
+ * 短局保留入场动画（观感的一部分）；长局关掉——那时动画的代价
+ * 已经盖过收益，玩家更在意流不流畅。
+ */
+function syncPerfClass() {
+  const m = box();
+  if (!m) return;
+  const total = windowSource?.length ?? 0;
+  m.classList.toggle('long-log', total > 400);
+}
+
+/**
+ * 往前再加载一段更早的消息（插到列表顶部）。
+ *
+ * 必须补偿滚动位置：插入内容会把当前视图整体下推，玩家会觉得
+ * 「我明明在看这里，怎么跳了」。记下插入前后的 scrollHeight 差值补回去。
+ */
+export function showEarlier() {
+  const m = box();
+  if (!m || !windowSource) return false;
+
+  const from = Math.max(0, windowStart - LOAD_STEP);
+  if (from >= windowStart) return false;   // 已经到头
+
+  const beforeHeight = m.scrollHeight;
+  const beforeTop = m.scrollTop;
+
+  // 这批更早的消息要插到最前面，所以先建成片段再一次性插入
+  const frag = document.createDocumentFragment();
+  const probe = { parent: null };
+
+  suppressEnterAnim = true;
+  try {
+    for (let i = from; i < windowStart; i++) {
+      const el = renderMessage(windowSource[i], { parent: frag });
+      if (el) probe.parent = frag;
+    }
+  } finally {
+    suppressEnterAnim = false;
+  }
+
+  m.insertBefore(frag, m.firstChild);
+  windowStart = from;
+
+  // 补偿滚动：内容变高了，把视图拉回原来的位置
+  m.scrollTop = beforeTop + (m.scrollHeight - beforeHeight);
+
+  updateEarlierButton();
+  return true;
+}
+
+/** 同步「更早的记录」按钮的显隐与文案 */
+function updateEarlierButton() {
+  const btn = document.querySelector('#btnEarlier');
+  if (!btn) return;
+
+  const total = windowSource?.length ?? 0;
+  const hidden = windowStart <= 0;
+  btn.hidden = hidden;
+  if (!hidden) {
+    btn.textContent = `↑ 更早的记录（还有 ${windowStart} 条）`;
+  }
+}
+
+/** 当前是否还有更早的消息未渲染 */
+export function hasEarlierMessages() {
+  return windowStart > 0;
 }
 
 /**
@@ -363,9 +508,7 @@ function flushPending() {
   // 玩家上翻着的时候新内容在底部增长：提示他「下面还有」
   const btn = document.querySelector('#btnScrollBottom');
   if (btn) btn.hidden = stick;
-}
-
-/**
+}/**
  * 请求刷新某条流式消息。同一帧内多次调用只写一次 DOM。
  * @param msg 消息对象（引擎会持续往 msg.text 追加内容）
  */
