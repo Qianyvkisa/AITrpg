@@ -3,6 +3,49 @@
 // ---------------------------------------------------------------------------
 
 /**
+ * 点遮罩空白处关闭弹窗——但要排除「框选文字时拖出弹窗」这种情况。
+ *
+ * 为什么不能用 click + `e.target === backdrop` 判断（原来的写法）：
+ *   click 的 target 是**按下与松开位置的最近共同祖先**。
+ *   玩家在弹窗里按住鼠标拖选文字，手滑移出弹窗、在遮罩上松开，
+ *   按下在弹窗内、松开在遮罩，共同祖先正好是 backdrop——
+ *   于是被判定成「点了遮罩」，弹窗自己关掉了。设置界面里框选
+ *   模型名、API 地址时经常触发，输入的内容也跟着丢了。
+ *
+ * 正确判据是「按下和松开**都**落在遮罩空白处」才算真的点了遮罩：
+ *   - 弹窗内按下 → 遮罩上松开（框选拖出去）：不关
+ *   - 遮罩按下   → 弹窗内松开（拖回来改主意）：不关
+ *   - 遮罩按下   → 遮罩上松开（真的点空白）：关
+ *
+ * 用 mouseup 而不是 click，就是为了拿到松开那一刻真实的 target，
+ * 而不是 click 那个「共同祖先」。
+ *
+ * @param {Element} backdrop 遮罩元素
+ * @param {() => void} onClose 确认要关闭时调用
+ */
+function bindBackdropClose(backdrop, onClose) {
+  // 记录按下时落在哪里；只在 mouseup 时读取一次就重置
+  let downTarget = null;
+
+  backdrop.addEventListener('mousedown', (e) => {
+    downTarget = e.target;
+  });
+
+  backdrop.addEventListener('mouseup', (e) => {
+    const bothOnBackdrop = downTarget === backdrop && e.target === backdrop;
+    downTarget = null;
+    if (bothOnBackdrop) onClose();
+  });
+
+  // 鼠标移出窗口再松开时收不到 mouseup，downTarget 会留着旧值。
+  // 下次 mousedown 会重新赋值，所以不会误判；这里额外兜一层，
+  // 避免「上次残留 + 这次在遮罩上松开」凑成一次假点击。
+  backdrop.addEventListener('mouseleave', () => {
+    downTarget = null;
+  });
+}
+
+/**
  * 打开一个弹窗。
  * @param html 弹窗内容（含 .modal 结构）
  * @returns { backdrop, close }
@@ -16,10 +59,8 @@ export function openModal(html) {
 
   const close = () => backdrop.remove();
 
-  // 关闭：点遮罩空白处或带 data-close 的按钮
-  backdrop.addEventListener('click', (e) => {
-    if (e.target === backdrop) close();
-  });
+  // 关闭：点遮罩空白处（且不是框选拖出去）或带 data-close 的按钮
+  bindBackdropClose(backdrop, close);
   backdrop.querySelectorAll('[data-close]').forEach((b) => { b.onclick = close; });
 
   return { backdrop, close };
@@ -106,10 +147,8 @@ export function openPrompt(opts = {}) {
       resolve(result);
     };
 
-    // 点遮罩 / 点 × 都算取消
-    backdrop.addEventListener('click', (e) => {
-      if (e.target === backdrop) finish(null);
-    });
+    // 点遮罩空白处算取消（同样排除框选拖出去的误触，见 bindBackdropClose）
+    bindBackdropClose(backdrop, () => finish(null));
     backdrop.querySelectorAll('[data-close]').forEach((b) => {
       b.onclick = () => finish(null);
     });

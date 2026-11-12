@@ -1,11 +1,11 @@
 {
   "name": "coc-keeper",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "COC 7th Edition AI Keeper - AI 同时担任守密人与队友调查员",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node tests/rules.test.mjs && node tests/unit.test.mjs && node tests/occupations.test.mjs && node tests/charStore.test.mjs && node tests/charGen.points.test.mjs && node tests/charEditor.smoke.mjs && node tests/gameSetup.smoke.mjs && node tests/messages.dom.test.mjs && node tests/ruleBook.test.mjs && node tests/teammateAct.test.mjs && node tests/retry.test.mjs && node tests/llmRetry.test.mjs && node tests/errorFlow.test.mjs && node tests/autoAdvance.test.mjs && node tests/autoAdvanceRunner.test.mjs && node tests/autoRecover.flow.test.mjs && node tests/autoAdvance.dom.test.mjs && node tests/contextReplay.test.mjs && node tests/uiFeatures.dom.test.mjs && node tests/perfWindow.dom.test.mjs",
+    "test": "node tests/rules.test.mjs && node tests/unit.test.mjs && node tests/occupations.test.mjs && node tests/charStore.test.mjs && node tests/charGen.points.test.mjs && node tests/charEditor.smoke.mjs && node tests/gameSetup.smoke.mjs && node tests/messages.dom.test.mjs && node tests/ruleBook.test.mjs && node tests/teammateAct.test.mjs && node tests/retry.test.mjs && node tests/llmRetry.test.mjs && node tests/errorFlow.test.mjs && node tests/autoAdvance.test.mjs && node tests/autoAdvanceRunner.test.mjs && node tests/autoRecover.flow.test.mjs && node tests/autoAdvance.dom.test.mjs && node tests/contextReplay.test.mjs && node tests/uiFeatures.dom.test.mjs && node tests/perfWindow.dom.test.mjs && node tests/modalBackdrop.test.mjs",
     "pack": "electron-builder --dir",
     "patch:nsis": "node tools/patch-portable-nsi.mjs",
     "verify:startup": "node tools/verify-startup.mjs",
