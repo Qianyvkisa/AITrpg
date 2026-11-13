@@ -179,10 +179,20 @@ export class GameEngine {
   // -------------------------------------------------------------------------
   // 主流程：玩家行动 → KP 回复（流式）
   // -------------------------------------------------------------------------
-  async playerAction(text) {
+  /**
+   * @param {string} text 玩家行动
+   * @param {{hidden?: boolean}} [opts]
+   *   hidden=true：这条消息**不显示在界面上**，但仍然留在上下文里喂给 AI。
+   *   自动推进用的「继续推进」是程序生成的占位语，不是玩家真的打了字；
+   *   把它当成玩家发言显示出来很出戏（玩家会看到自己"说"了句没说过的话）。
+   *   但它必须留在上下文里，否则 AI 不知道这一轮是要它往下推。
+   */
+  async playerAction(text, opts = {}) {
     if (!text.trim()) return;
-    this.pushMessage({ role: 'user', text });
-    this.state.scenario.events.push(`玩家：${text.slice(0, 60)}`);
+    this.pushMessage(opts.hidden ? { role: 'user', text, hidden: true } : { role: 'user', text });
+    // 场景事件记录同理：自动推进不记成「玩家做了什么」，
+    // 否则场景摘要里会堆满「玩家：继续推进剧情」这种无信息量的条目。
+    if (!opts.hidden) this.state.scenario.events.push(`玩家：${text.slice(0, 60)}`);
     return this.runKeeper();
   }
 
@@ -356,10 +366,10 @@ export class GameEngine {
    * 不再自动续跑，也不再让队友插话——否则 KP 会在骰点还没掷出时
    * 就叙述一个虚构的结果。玩家掷完骰后由 rollAndResume 接着跑。
    */
-  async takeTurn(text) {
+  async takeTurn(text, opts = {}) {
     const before = this.state.messages.length;
     // playerAction 会返回 runKeeper 的成败；KP 连不上时不必再往下续跑
-    const firstOk = await this.playerAction(text);
+    const firstOk = await this.playerAction(text, opts);
 
     // 有玩家待掷骰：交给界面等玩家点按钮
     if (this.pendingRolls().length) {

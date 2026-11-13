@@ -232,7 +232,47 @@ export function renderMessage(msg, opts = {}) {
   }
 
   (parent || box())?.appendChild(wrap);
+  if (!parent) trimTop();
   return wrap;
+}
+
+/**
+ * 从顶部裁掉超出窗口的消息，让 DOM 规模恒定。
+ *
+ * 为什么需要它：renderAllMessages 只在开局/读档时调用，之后每轮都是
+ * 增量 append。没有这一步的话，窗口化只在读档那一刻生效，跑起来 DOM
+ * 照样一路涨到上万节点——长局照样卡。这里保证「最多 RENDER_WINDOW 条」。
+ *
+ * 只裁顶部、不动底部，是因为玩家永远在看最新内容；裁掉的是已经滚出
+ * 视野上方的老消息，它们的 DOM 留在内存里毫无价值。
+ *
+ * windowStart 要跟着同步推进，否则「更早的记录」会重复加载已经裁掉的区间。
+ */
+function trimTop() {
+  const m = box();
+  if (!m) return;
+
+  // 数出当前 DOM 里的可见消息节点数（.msg 与 .msg-group 都算一条）
+  let nodes = 0;
+  for (const child of m.children) {
+    if (child.classList?.contains?.('msg') || child.classList?.contains?.('msg-group')) nodes++;
+    else if (child.dataset?.msgId) nodes++;
+  }
+  if (nodes <= RENDER_WINDOW) return;
+
+  // 从头删，直到回到窗口上限。同步推进 windowStart 到被删到的位置之后。
+  let excess = nodes - RENDER_WINDOW;
+  while (excess > 0 && m.firstChild) {
+    const first = m.firstChild;
+    const id = first.dataset?.msgId;
+    m.removeChild(first);
+    excess--;
+    // 把 windowStart 推进到这条被删消息的下一个下标
+    if (windowSource && id) {
+      const idx = windowSource.findIndex((x) => x.id === id);
+      if (idx >= windowStart) windowStart = idx + 1;
+    }
+  }
 }
 
 /**
@@ -283,6 +323,7 @@ function renderKeeperWithSays(msg, segs, parent = null) {
   });
 
   (parent || box())?.appendChild(anchor);
+  if (!parent) trimTop();
   return anchor;
 }
 
@@ -299,7 +340,7 @@ export function renderAllMessages(messages) {
 
   const list = Array.isArray(messages) ? messages : [];
   windowSource = list;
-  windowStart = Math.max(0, list.length - RENDER_WINDOW);
+  windowStart = computeWindowStart(list, list.length);
 
   m.innerHTML = '';
 
@@ -314,6 +355,29 @@ export function renderAllMessages(messages) {
   updateEarlierButton();
   syncPerfClass();
   scrollToBottom({ force: true });
+}
+
+/**
+ * 从 `end` 往前数出 `count` 条**可见**消息，返回窗口起点下标。
+ *
+ * 为什么不直接 `end - count`：
+ *   自动推进每轮都会产生一条 hidden 消息（占位推进语，见 engine.playerAction），
+ *   它们不渲染。按总条数切窗口时，hidden 越多，屏幕上真正看到的越少——
+ *   长局里可能 200 条窗口只剩 150 条可见。按可见条数数才符合直觉。
+ *
+ * 可见条数不足 count 时返回 0（已到头）。
+ */
+function computeWindowStart(list, end, count = RENDER_WINDOW) {
+  let visible = 0;
+  let i = end - 1;
+  while (i >= 0) {
+    if (!list[i]?.hidden) {
+      visible++;
+      if (visible >= count) return i;
+    }
+    i--;
+  }
+  return 0;
 }
 
 /**
@@ -339,7 +403,8 @@ export function showEarlier() {
   const m = box();
   if (!m || !windowSource) return false;
 
-  const from = Math.max(0, windowStart - LOAD_STEP);
+  // 同样按**可见**条数往前数 LOAD_STEP 条（理由见 computeWindowStart）
+  const from = computeWindowStart(windowSource, windowStart, LOAD_STEP);
   if (from >= windowStart) return false;   // 已经到头
 
   const beforeHeight = m.scrollHeight;
@@ -374,11 +439,17 @@ function updateEarlierButton() {
   const btn = document.querySelector('#btnEarlier');
   if (!btn) return;
 
-  const total = windowSource?.length ?? 0;
   const hidden = windowStart <= 0;
   btn.hidden = hidden;
   if (!hidden) {
-    btn.textContent = `↑ 更早的记录（还有 ${windowStart} 条）`;
+    // 数的是「还能翻出多少条**看得见**的消息」：
+    // windowStart 是下标，里面混着不渲染的 hidden 消息，
+    // 直接显示下标会虚高（玩家点开却发现少了一截）。
+    let remaining = 0;
+    for (let i = 0; i < windowStart; i++) {
+      if (!windowSource?.[i]?.hidden) remaining++;
+    }
+    btn.textContent = `↑ 更早的记录（还有 ${remaining} 条）`;
   }
 }
 

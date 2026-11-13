@@ -66,6 +66,12 @@ class El {
     if (node instanceof Frag) node.children = [];
     return node;
   }
+  removeChild(node) {
+    const i = this.children.indexOf(node);
+    if (i >= 0) this.children.splice(i, 1);
+    node.parentNode = null;
+    return node;
+  }
   addEventListener(t, fn) { this._handlers[t] = fn; }
   removeEventListener() {}
   setAttribute(k, v) { this[k] = v; }
@@ -126,7 +132,7 @@ globalThis.document = {
   createDocumentFragment: () => new Frag()
 };
 
-const { renderAllMessages, showEarlier, hasEarlierMessages } =
+const { renderAllMessages, showEarlier, hasEarlierMessages, renderMessage } =
   await import('../src/ui/messages.js');
 
 let passed = 0, failed = 0;
@@ -309,6 +315,68 @@ console.log('\n== 超长局面关掉入场动画 ==');
 }
 
 // ---------------------------------------------------------------------------
+console.log('\n== 增量渲染（跑团进行中）不涨 DOM ==');
+
+{
+  // 这是窗口化真正生效的关键：renderAllMessages 只在开局/读档调用，
+  // 之后每轮都是 renderMessage 增量 append。如果只有前者做了窗口化，
+  // 长局跑起来 DOM 照样一路涨到上万节点——等于没优化。
+  const all = makeMessages(500);
+  const m = els['#messages'];
+  m._scrollHeight = 50000;
+  m._clientHeight = 800;
+
+  renderAllMessages(all);
+  const initial = m.children.length;
+  ok(initial <= 200, `读档后窗口内 ${initial} 条`);
+
+  // 模拟又跑了 300 轮：每轮 append 一条新消息
+  for (let i = 500; i < 800; i++) {
+    const msg = { id: `m${i}`, role: 'keeper', text: `第 ${i} 条`, ts: 1700000000000 + i };
+    all.push(msg);
+    renderMessage(msg);
+  }
+
+  const after = m.children.length;
+  ok(after <= 200, `跑完 300 轮后仍有 ${after} 条（不随轮数增长）`);
+  eq(after, 200, 'DOM 稳定在窗口上限');
+
+  // 最新一条必须还在（裁的是顶部老消息，不能裁掉玩家正在看的）
+  const last = m.children[m.children.length - 1];
+  eq(last.dataset.msgId, 'm799', '最新消息仍在 DOM 里');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n== 裁剪后「更早」仍可往前翻，且不重复 ==');
+
+{
+  const all = makeMessages(500);
+  const m = els['#messages'];
+  m._scrollHeight = 50000;
+  m._clientHeight = 800;
+
+  renderAllMessages(all);
+
+  // 增量推到 800 条，顶部被裁掉 300 条
+  for (let i = 500; i < 800; i++) {
+    const msg = { id: `m${i}`, role: 'keeper', text: `第 ${i} 条`, ts: 1700000000000 + i };
+    all.push(msg);
+    renderMessage(msg);
+  }
+
+  ok(hasEarlierMessages(), '裁剪后仍标记有更早的');
+
+  const before = m.children.length;
+  showEarlier();
+  ok(m.children.length > before, '能往前加载更早的内容');
+
+  // 不该出现重复的 msgId
+  const ids = m.children.map((c) => c.dataset.msgId).filter(Boolean);
+  const dup = ids.length !== new Set(ids).size;
+  ok(!dup, '没有重复渲染同一条消息');
+}
+
+// ---------------------------------------------------------------------------
 console.log('\n== 边界情况 ==');
 
 {
@@ -322,6 +390,50 @@ console.log('\n== 边界情况 ==');
 
   renderAllMessages(null);
   eq(m.children.length, 0, 'null 不报错');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n== hidden 消息不占窗口名额 ==');
+
+{
+  // 自动推进每轮会产生一条 hidden 占位消息（见 engine.playerAction）。
+  // 它们不渲染，所以不该占用「渲染最近 200 条」的名额，
+  // 否则屏幕上真正看到的会少于 200 条。
+  const all = makeMessages(600);
+  // 把后 300 条里的一半标成 hidden
+  for (let i = 300; i < 600; i += 2) all[i].hidden = true;
+
+  const m = els['#messages'];
+  m._scrollHeight = 60000;
+  m._clientHeight = 800;
+
+  renderAllMessages(all);
+
+  const rendered = m.children.length;
+  eq(rendered, 200, '可见条数仍是 200（hidden 不占名额）');
+
+  // 渲染出来的都应该是非 hidden 的
+  const anyHidden = m.children.some((c) => {
+    const src = all.find((x) => x.id === c.dataset.msgId);
+    return src?.hidden;
+  });
+  ok(!anyHidden, '渲染出的都是可见消息，没有 hidden');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n== 全是 hidden 的极端情况 ==');
+
+{
+  const all = makeMessages(100);
+  for (const x of all) x.hidden = true;
+
+  const m = els['#messages'];
+  m._scrollHeight = 10000;
+  m._clientHeight = 800;
+
+  renderAllMessages(all);
+  eq(m.children.length, 0, '全 hidden 时渲染 0 条，不崩');
+  ok(!hasEarlierMessages(), '全 hidden 时没有「更早」');
 }
 
 // ---------------------------------------------------------------------------

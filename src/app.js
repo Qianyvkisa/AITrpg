@@ -273,7 +273,14 @@ async function spectatorAdvance(opts = {}) {
   }
 
   const input = $('#input');
-  const text = input.value.trim() || '（继续推进剧情，让调查员们继续行动）';
+  // 玩家没输入就点「推进」时，用一句占位语催 KP 往下走。
+  // 这句话**不该显示在界面上**——它不是玩家说的话，摆出来很出戏
+  // （玩家会看到自己"说"了一句从没打过的话）。
+  // 但它仍要作为 user 消息进上下文，否则 AI 不知道这轮该继续推进。
+  const typed = input.value.trim();
+  const text = typed || '（继续推进剧情，让调查员们继续行动）';
+  // 只有程序补的占位语才隐藏；玩家自己打了字就正常显示
+  const hiddenPlaceholder = !typed;
   input.value = '';
   input.style.height = 'auto';
 
@@ -286,7 +293,7 @@ async function spectatorAdvance(opts = {}) {
   //     立刻按正常间隔（2s）重排，把「暂停等玩家」变成无限重试。
   let failed = false;
   try {
-    const res = await engine.takeTurn(text);
+    const res = await engine.takeTurn(text, { hidden: hiddenPlaceholder });
     // 只有这一轮真的跑成了才计轮数。KP 连不上时不计，否则轮数会虚增，
     // 而且自动推进会拿着「成功」的信号继续往下跑。
     if (res?.ok === false) {
