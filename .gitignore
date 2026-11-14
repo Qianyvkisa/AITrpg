@@ -65,3 +65,6 @@ assets/coc-kp.pdf
 # tools/ui/shots 是跑截图工具时生成的产物（每张几百 KB，且可随时重跑）。
 # 只保留脚本，不保留图片和报告。
 tools/ui/shots/
+
+# ---- 主题/布局核对截图（tools/ui 下脚本生成，随时可重跑）----
+.shots/

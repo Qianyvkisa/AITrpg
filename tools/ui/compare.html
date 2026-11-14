@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="brass" data-read-width="normal">
+<head>
+<meta charset="UTF-8">
+<title>四主题并排对比</title>
+<link rel="stylesheet" href="../../src/themes.css">
+<link rel="stylesheet" href="../../src/styles.css">
+<style>
+  /* 这一页只做视觉核对，不参与应用运行。
+     四个 iframe 各加载一份 preview 页面，横排对比同一界面的四套主题。 */
+  html, body { margin: 0; height: 100%; background: #05060a; }
+  body { display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); gap: 2px; }
+  .cell { position: relative; overflow: hidden; }
+  .cell iframe { width: 1600px; height: 900px; border: 0; transform-origin: 0 0; transform: scale(.5); }
+  .cell b {
+    position: absolute; left: 8px; bottom: 8px; z-index: 5;
+    font: 11px/1 ui-monospace, monospace; color: #fff; background: rgba(0,0,0,.7);
+    padding: 4px 8px; border-radius: 3px; letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+<div class="cell"><iframe src="index.html?view=game&theme=brass"></iframe><b>BRASS 黄铜档案</b></div>
+<div class="cell"><iframe src="index.html?view=game&theme=abyss"></iframe><b>ABYSS 深海幽蓝</b></div>
+<div class="cell"><iframe src="index.html?view=game&theme=phosphor"></iframe><b>PHOSPHOR 磷光终端</b></div>
+<div class="cell"><iframe src="index.html?view=game&theme=blood"></iframe><b>BLOOD 血月绯红</b></div>
+</body>
+</html>

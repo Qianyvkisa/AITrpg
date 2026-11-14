@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>UI 布局验证</title>
+  <link rel="stylesheet" href="../../src/themes.css">
   <link rel="stylesheet" href="../../src/styles.css">
   <style>
     body { background: #0a0b0f; }
@@ -12,6 +13,31 @@
 </head>
 <body>
   <div id="modalRoot"></div>
+  <script>
+    // 预览页的错误陷阱：模块里任何一步抛错都会让整页空白，
+    // 而空白页截图上完全看不出原因。这里把错误直接写进 DOM，
+    // --dump-dom 就能抓到（开发预览专用，不影响应用本体）。
+    (function () {
+      const show = (msg) => {
+        let pre = document.getElementById('previewError');
+        if (!pre) {
+          pre = document.createElement('pre');
+          pre.id = 'previewError';
+          pre.style.cssText = 'position:fixed;inset:0;z-index:9999;margin:0;padding:16px;'
+            + 'background:#1a0d0d;color:#f88;font:12px/1.6 monospace;white-space:pre-wrap;overflow:auto';
+          document.body.appendChild(pre);
+        }
+        pre.textContent += msg + '\n';
+      };
+      window.addEventListener('error', (e) => {
+        show('ERROR: ' + (e.message || e.type) + (e.filename ? ' @ ' + e.filename + ':' + e.lineno : ''));
+      });
+      window.addEventListener('unhandledrejection', (e) => {
+        const r = e.reason;
+        show('REJECT: ' + (r && (r.stack || r.message) || String(r)));
+      });
+    })();
+  </script>
   <script type="module" src="./preview.js"></script>
 </body>
 </html>

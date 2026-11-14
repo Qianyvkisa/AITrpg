@@ -50,7 +50,37 @@ export function createInitialState() {
       temperature: 0.8,
       maxTokens: 2048
     },
-    saveSlot: 'auto'
+    saveSlot: 'auto',
+    // ---- 外观 ----
+    // 主题与阅读宽度：运行时镜像 config.json 的值，由 loadConfig() 填充。
+    // 不进存档——换角色卡不该让界面配色跟着变。
+    // 合法值见 src/ui/theme.js；这里给默认值只是为了让首次渲染有东西可用。
+    uiTheme: 'brass',
+    readWidth: 'normal',
+    // 侧栏折叠：纯运行时状态，不持久化。
+    // 折叠是为了「这一会儿专心读叙事」，下次启动应该回到完整三栏。
+    hideLeftPanel: false,
+    hideRightPanel: false,
+    // 联机状态。只存在于运行时，不写进存档——读档恢复一个「已联机」
+    // 状态是没有意义的，socket 早就不在了。
+    net: {
+      // null | 'host' | 'client'
+      role: null,
+      // 房主：房间码 / 端口；客户端：房主地址
+      roomCode: '',
+      port: 0,
+      host: '',
+      // 本机在这个房间里的 playerId
+      myPlayerId: '',
+      // 房间里的所有人 [{ id, name, charId, online }]
+      players: [],
+      // 连接状态（客户端用）：'connecting' | 'online' | 'reconnecting' | 'offline'
+      status: 'offline',
+      // 房主端最近一次推送的玩家列表版本，用于避免无意义重绘
+      lastPlayersHash: ''
+    },
+    // 玩家在联机里用的名字，开房/加入时记住，下次不用重填
+    netName: ''
   };
 }
 

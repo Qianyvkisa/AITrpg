@@ -59,6 +59,7 @@ function bootstrap() {
   } = require('./electron/window');
   const { registerConfigIpc } = require('./electron/config');
   const { registerLlmIpc } = require('./electron/llm');
+  const { registerNetIpc } = require('./electron/net-ipc');
   const {
     registerSaveIpc, registerModuleIpc, registerStoreIpc, registerCharIpc,
     registerRuleBookIpc, registerRuleBookWindowIpc, registerFileIpc
@@ -72,6 +73,7 @@ function bootstrap() {
 
   registerConfigIpc();
   registerLlmIpc(getWindow);
+  registerNetIpc(getWindow);
   registerSaveIpc();
   registerModuleIpc(getWindow);
   registerStoreIpc();

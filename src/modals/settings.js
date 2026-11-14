@@ -1,117 +1,205 @@
 // ---------------------------------------------------------------------------
-// 设置弹窗：KP 模型 / 队友模型 / 叙事基调 / 连接测试
+// 设置弹窗：KP 模型 / 队友模型 / 叙事基调 / 外观
+//
+// 结构说明：
+//   原来是一个长滚动列表，加了「外观」之后要滚三屏才找得到，所以改成 tab。
+//   tab 只切 hidden 属性，**所有面板始终留在 DOM 里**——
+//   这样 collect() 里 querySelector('#cfgBaseUrl') 之类的取值逻辑完全不用改
+//   （hidden 不影响 input.value），也避免了「切走再切回来输入丢失」。
+//
+// 外观的即时预览与回滚：
+//   点主题卡片立刻 applyTheme，不写盘——用户要能看到效果才决定。
+//   点「取消 / × / 遮罩」时回滚到打开面板时的值；
+//   只有点「保存」才写进 config.json。
+//   因为 openModal 返回的 close 不感知「是否保存过」，
+//   这里自己包一层 closeModal，所有关闭路径都走它。
 // ---------------------------------------------------------------------------
 import { openModal } from './shell.js';
 import { escapeHtml } from '../shared/text.js';
 import { modelsHintText, modelsErrorText, filterModels } from './modelPicker.js';
+import {
+  THEMES,
+  READ_WIDTHS,
+  applyTheme,
+  applyReadWidth,
+  normalizeTheme,
+  normalizeReadWidth
+} from '../ui/theme.js';
 
 const TONES = ['经典恐怖', '调查悬疑', '硬核生存', '黑色幽默'];
+
+/** tab 定义：id 与 data-pane 对应 */
+const TABS = [
+  { id: 'model', name: '模型' },
+  { id: 'story', name: '叙事' },
+  { id: 'theme', name: '外观' }
+];
 
 export async function openSettings(state, onChanged) {
   const cfg = await window.api.getConfig();
 
+  // 打开面板时的外观值，用于「未保存就关闭」时回滚
+  const originTheme = normalizeTheme(cfg.uiTheme ?? state.uiTheme);
+  const originWidth = normalizeReadWidth(cfg.readWidth ?? state.readWidth);
+
+  // 面板内当前选中的外观值（点卡片改这个，保存时写它）
+  let pickedTheme = originTheme;
+  let pickedWidth = originWidth;
+
+  // 主题卡片：左边是该主题的母题缩略图（形状 + 强调色），
+  // 右边是名称、母题名、描述。三色块换成了图案预览，
+  // 因为「换风格」的差异主要在图案和形态语言，纯色块看不出区别。
+  //
+  // ⚠ 图案的 data URI 里带单引号（SVG 属性用单引号避免和 HTML 双引号打架），
+  //   所以不能塞进 style="..." 属性——单双引号会互相截断，
+  //   浏览器把剩下的 `motif-...` 当成属性名，卡片上直接显示成文字（踩过）。
+  //   这里只写 data-theme-id，图案由 applySwatchVars() 用 JS 设到 element.style 上。
+  const themeCards = THEMES.map((t) => `
+    <button class="theme-opt ${t.id === pickedTheme ? 'on' : ''}" data-theme-id="${t.id}" type="button">
+      <span class="theme-swatch" data-swatch-for="${t.id}"></span>
+      <span class="theme-body">
+        <span class="theme-name">${escapeHtml(t.name)}</span>
+        <span class="theme-motif">${escapeHtml(t.motif || '')}</span>
+        <span class="theme-desc">${escapeHtml(t.desc)}</span>
+      </span>
+    </button>
+  `).join('');
+
+  const widthCards = READ_WIDTHS.map((w) => `
+    <button class="rw-opt ${w.id === pickedWidth ? 'on' : ''}" data-rw-id="${w.id}" type="button">
+      <span class="rw-name">${escapeHtml(w.name)}</span>
+      <span class="rw-desc">${escapeHtml(w.desc)}</span>
+    </button>
+  `).join('');
+
+  const tabsHtml = TABS.map((t, i) => `
+    <button class="st-tab ${i === 0 ? 'on' : ''}" data-tab="${t.id}" type="button">${t.name}</button>
+  `).join('');
+
   const { backdrop, close } = openModal(`
-    <div class="modal">
+    <div class="modal wide">
       <div class="modal-head">
         <h2>设置</h2>
         <button class="icon-btn" data-close>×</button>
       </div>
+      <div class="st-tabs">${tabsHtml}</div>
       <div class="modal-body">
-        <section class="field-group">
-          <h3>KP（守密人）模型</h3>
-          <label class="field">
-            <span>API 地址</span>
-            <input id="cfgBaseUrl" type="text" value="${escapeHtml(cfg.baseUrl)}" placeholder="https://api.deepseek.com/v1">
-            <em>OpenAI 兼容接口 · DeepSeek: https://api.deepseek.com/v1 · Ollama: http://localhost:11434/v1</em>
-          </label>
-          <label class="field">
-            <span>API Key</span>
-            <input id="cfgApiKey" type="password" value="${escapeHtml(cfg.apiKey)}" placeholder="sk-...">
-            <em>本地模型（Ollama / LM Studio）可留空</em>
-          </label>
-          <label class="field">
-            <span>模型名</span>
-            <div class="model-row">
-              <input id="cfgModel" type="text" value="${escapeHtml(cfg.model)}" placeholder="deepseek-chat">
-              <button class="btn ghost model-fetch" id="btnFetchModels" type="button">获取模型</button>
-            </div>
-            <em id="modelHint">DeepSeek: deepseek-chat · Ollama: qwen2.5:14b</em>
-            <div class="model-panel" id="modelPanel" hidden>
-              <input class="model-search" id="modelSearch" type="text" placeholder="搜索模型名…">
-              <div class="model-list" id="modelList"></div>
-            </div>
-          </label>
-          <div class="field-row">
+        <!-- ================= 模型 ================= -->
+        <div class="st-pane" data-pane="model">
+          <section class="field-group">
+            <h3>KP（守密人）模型</h3>
             <label class="field">
-              <span>温度</span>
-              <input id="cfgTemp" type="number" step="0.1" min="0" max="2" value="${cfg.temperature}">
+              <span>API 地址</span>
+              <input id="cfgBaseUrl" type="text" value="${escapeHtml(cfg.baseUrl)}" placeholder="https://api.deepseek.com/v1">
+              <em>OpenAI 兼容接口 · DeepSeek: https://api.deepseek.com/v1 · Ollama: http://localhost:11434/v1</em>
             </label>
             <label class="field">
-              <span>最大 Token</span>
-              <input id="cfgMaxTokens" type="number" step="128" min="256" value="${cfg.maxTokens}">
+              <span>API Key</span>
+              <input id="cfgApiKey" type="password" value="${escapeHtml(cfg.apiKey)}" placeholder="sk-...">
+              <em>本地模型（Ollama / LM Studio）可留空</em>
             </label>
-          </div>
-        </section>
-
-        <section class="field-group">
-          <h3>队友模型（可选 · 留空则用上面同一套）</h3>
-          <label class="field">
-            <span>API 地址</span>
-            <input id="cfgTeamBaseUrl" type="text" value="${escapeHtml(cfg.teammateBaseUrl || '')}" placeholder="留空 = 同上">
-          </label>
-          <label class="field">
-            <span>API Key</span>
-            <input id="cfgTeamApiKey" type="password" value="${escapeHtml(cfg.teammateApiKey || '')}" placeholder="留空 = 同上">
-          </label>
-          <label class="field">
-            <span>模型名</span>
-            <div class="model-row">
-              <input id="cfgTeamModel" type="text" value="${escapeHtml(cfg.teammateModel || '')}" placeholder="留空 = 同上">
-              <button class="btn ghost model-fetch" id="btnFetchTeamModels" type="button">获取模型</button>
+            <label class="field">
+              <span>模型名</span>
+              <div class="model-row">
+                <input id="cfgModel" type="text" value="${escapeHtml(cfg.model)}" placeholder="deepseek-chat">
+                <button class="btn ghost model-fetch" id="btnFetchModels" type="button">获取模型</button>
+              </div>
+              <em id="modelHint">DeepSeek: deepseek-chat · Ollama: qwen2.5:14b</em>
+              <div class="model-panel" id="modelPanel" hidden>
+                <input class="model-search" id="modelSearch" type="text" placeholder="搜索模型名…">
+                <div class="model-list" id="modelList"></div>
+              </div>
+            </label>
+            <div class="field-row">
+              <label class="field">
+                <span>温度</span>
+                <input id="cfgTemp" type="number" step="0.1" min="0" max="2" value="${cfg.temperature}">
+              </label>
+              <label class="field">
+                <span>最大 Token</span>
+                <input id="cfgMaxTokens" type="number" step="128" min="256" value="${cfg.maxTokens}">
+              </label>
             </div>
-            <em id="teamModelHint">留空则用上面同一套</em>
-            <div class="model-panel" id="teamModelPanel" hidden>
-              <input class="model-search" id="teamModelSearch" type="text" placeholder="搜索模型名…">
-              <div class="model-list" id="teamModelList"></div>
+          </section>
+
+          <section class="field-group">
+            <h3>队友模型（可选 · 留空则用上面同一套）</h3>
+            <label class="field">
+              <span>API 地址</span>
+              <input id="cfgTeamBaseUrl" type="text" value="${escapeHtml(cfg.teammateBaseUrl || '')}" placeholder="留空 = 同上">
+            </label>
+            <label class="field">
+              <span>API Key</span>
+              <input id="cfgTeamApiKey" type="password" value="${escapeHtml(cfg.teammateApiKey || '')}" placeholder="留空 = 同上">
+            </label>
+            <label class="field">
+              <span>模型名</span>
+              <div class="model-row">
+                <input id="cfgTeamModel" type="text" value="${escapeHtml(cfg.teammateModel || '')}" placeholder="留空 = 同上">
+                <button class="btn ghost model-fetch" id="btnFetchTeamModels" type="button">获取模型</button>
+              </div>
+              <em id="teamModelHint">留空则用上面同一套</em>
+              <div class="model-panel" id="teamModelPanel" hidden>
+                <input class="model-search" id="teamModelSearch" type="text" placeholder="搜索模型名…">
+                <div class="model-list" id="teamModelList"></div>
+              </div>
+            </label>
+            <em class="hint">可以把队友交给本地小模型，省 API 费用</em>
+          </section>
+        </div>
+
+        <!-- ================= 叙事 ================= -->
+        <div class="st-pane" data-pane="story" hidden>
+          <section class="field-group">
+            <h3>叙事基调</h3>
+            <div class="tone-picker" id="tonePicker">
+              ${TONES.map((t) => `<button class="tone-opt ${state.tone === t ? 'on' : ''}" data-tone="${t}" type="button">${t}</button>`).join('')}
             </div>
-          </label>
-          <em class="hint">可以把队友交给本地小模型，省 API 费用</em>
-        </section>
+          </section>
 
-        <section class="field-group">
-          <h3>队友行动方式</h3>
-          <label class="field-check">
-            <input id="cfgTeammateAutonomous" type="checkbox" ${state.teammateAutonomous === false ? '' : 'checked'}>
-            <span>队友由自己的 AI 决定行动（推荐）</span>
-          </label>
-          <em class="hint">
-            开启后，每位队友各自独立思考这一轮要做什么，彼此会有真正的分歧；<br>
-            代价是每位队友每轮多一次 API 调用。关掉则退回旧行为：队友的行动和台词全由 KP 一人代演。
-          </em>
-        </section>
+          <section class="field-group">
+            <h3>队友行动方式</h3>
+            <label class="field-check">
+              <input id="cfgTeammateAutonomous" type="checkbox" ${state.teammateAutonomous === false ? '' : 'checked'}>
+              <span>队友由自己的 AI 决定行动（推荐）</span>
+            </label>
+            <em class="hint">
+              开启后，每位队友各自独立思考这一轮要做什么，彼此会有真正的分歧；<br>
+              代价是每位队友每轮多一次 API 调用。关掉则退回旧行为：队友的行动和台词全由 KP 一人代演。
+            </em>
+          </section>
 
-        <section class="field-group">
-          <h3>队友自动发言</h3>
-          <label class="field-check">
-            <input id="cfgAutoTeammate" type="checkbox" ${state.autoTeammate === false ? '' : 'checked'}>
-            <span>KP 说完后，让队友自己接话</span>
-          </label>
-          <label class="field">
-            <span>接话概率</span>
-            <div class="range-row">
-              <input id="cfgTeammateChance" type="range" min="0" max="100" step="10" value="${Math.round((state.teammateChance ?? 0.7) * 100)}">
-              <em id="chanceHint">${Math.round((state.teammateChance ?? 0.7) * 100)}%</em>
-            </div>
-            <em class="hint">越高队友越活跃；100% 则每轮都有人接话</em>
-          </label>
-        </section>
+          <section class="field-group">
+            <h3>队友自动发言</h3>
+            <label class="field-check">
+              <input id="cfgAutoTeammate" type="checkbox" ${state.autoTeammate === false ? '' : 'checked'}>
+              <span>KP 说完后，让队友自己接话</span>
+            </label>
+            <label class="field">
+              <span>接话概率</span>
+              <div class="range-row">
+                <input id="cfgTeammateChance" type="range" min="0" max="100" step="10" value="${Math.round((state.teammateChance ?? 0.7) * 100)}">
+                <em id="chanceHint">${Math.round((state.teammateChance ?? 0.7) * 100)}%</em>
+              </div>
+              <em class="hint">越高队友越活跃；100% 则每轮都有人接话</em>
+            </label>
+          </section>
+        </div>
 
-        <section class="field-group">
-          <h3>叙事基调</h3>
-          <div class="tone-picker" id="tonePicker">
-            ${TONES.map((t) => `<button class="tone-opt ${state.tone === t ? 'on' : ''}" data-tone="${t}">${t}</button>`).join('')}
-          </div>
-        </section>
+        <!-- ================= 外观 ================= -->
+        <div class="st-pane" data-pane="theme" hidden>
+          <section class="field-group">
+            <h3>美术风格</h3>
+            <div class="theme-picker">${themeCards}</div>
+            <em class="hint">点一下立刻预览，点「保存」才会记住。四套都是暗色系，配合克苏鲁的夜间调查氛围。</em>
+          </section>
+
+          <section class="field-group">
+            <h3>阅读宽度</h3>
+            <div class="rw-picker">${widthCards}</div>
+            <em class="hint">叙事区的最大行宽。宽屏下拉得太长会让眼睛回行时串行，窄一点更好读。</em>
+          </section>
+        </div>
       </div>
       <div class="modal-foot">
         <button class="btn ghost" id="btnTest">测试连接</button>
@@ -121,6 +209,99 @@ export async function openSettings(state, onChanged) {
     </div>
   `);
 
+  // -------------------------------------------------------------------------
+  // 关闭：未保存则回滚外观
+  // -------------------------------------------------------------------------
+  let saved = false;
+
+  /** 统一的关闭入口：所有关闭路径都走这里，保证回滚一定发生 */
+  const closeModal = () => {
+    if (!saved) {
+      // 预览过但没保存：把界面还原成打开面板时的样子
+      applyTheme(originTheme);
+      applyReadWidth(originWidth);
+      state.uiTheme = originTheme;
+      state.readWidth = originWidth;
+    }
+    close();
+  };
+
+  // openModal 已经给 [data-close] 绑了 close()，这里覆盖掉，
+  // 让 × 按钮也走带回滚的版本。
+  backdrop.querySelectorAll('[data-close]').forEach((b) => {
+    b.onclick = closeModal;
+  });
+  // 遮罩点击同理。openModal 内部用的是 bindBackdropClose(backdrop, close)，
+  // 无法从外部替换，所以在捕获阶段拦一次：只在「真的点到遮罩空白」时生效。
+  let downOnBackdrop = null;
+  backdrop.addEventListener('mousedown', (e) => { downOnBackdrop = e.target; }, true);
+  backdrop.addEventListener('mouseup', (e) => {
+    const both = downOnBackdrop === backdrop && e.target === backdrop;
+    downOnBackdrop = null;
+    if (both) {
+      // 先让 openModal 自己的 handler 把弹窗移除，再回滚。
+      // 用 setTimeout(0) 排到它后面，避免和它的 close() 抢顺序。
+      setTimeout(() => {
+        if (!saved) {
+          applyTheme(originTheme);
+          applyReadWidth(originWidth);
+          state.uiTheme = originTheme;
+          state.readWidth = originWidth;
+        }
+      }, 0);
+    }
+  }, true);
+
+  // -------------------------------------------------------------------------
+  // tab 切换
+  // -------------------------------------------------------------------------
+  const panes = backdrop.querySelectorAll('.st-pane');
+  backdrop.querySelectorAll('.st-tab').forEach((tab) => {
+    tab.onclick = () => {
+      const id = tab.dataset.tab;
+      backdrop.querySelectorAll('.st-tab').forEach((t) => t.classList.toggle('on', t === tab));
+      panes.forEach((p) => { p.hidden = p.dataset.pane !== id; });
+    };
+  });
+
+  // -------------------------------------------------------------------------
+  // 外观：即时预览
+  // -------------------------------------------------------------------------
+
+  // 母题缩略图：把每个主题的图案变量设到对应的 .theme-swatch 上。
+  //
+  // 为什么不用内联 style 属性写：图案的 SVG data URI 里是单引号，
+  // 塞进 style="..." 会截断属性（截图里直接显示出 `motif-` 文字）。
+  // 用 element.style.setProperty 走 CSSOM，完全不经过 HTML 解析，引号无所谓。
+  backdrop.querySelectorAll('.theme-swatch[data-swatch-for]').forEach((el) => {
+    const t = THEMES.find((x) => x.id === el.dataset.swatchFor);
+    const p = t && t.preview;
+    if (!p) return;
+    if (p.mask) el.style.setProperty('--motif-swatch-mask', p.mask);
+    if (p.size) el.style.setProperty('--motif-swatch-size', p.size);
+    if (p.bg) el.style.setProperty('--motif-swatch-bg', p.bg);
+    if (p.accent) el.style.setProperty('--motif-swatch-accent', p.accent);
+  });
+
+  backdrop.querySelectorAll('.theme-opt').forEach((card) => {
+    card.onclick = () => {
+      pickedTheme = normalizeTheme(card.dataset.themeId);
+      backdrop.querySelectorAll('.theme-opt').forEach((c) => c.classList.toggle('on', c === card));
+      applyTheme(pickedTheme);
+    };
+  });
+
+  backdrop.querySelectorAll('.rw-opt').forEach((card) => {
+    card.onclick = () => {
+      pickedWidth = normalizeReadWidth(card.dataset.rwId);
+      backdrop.querySelectorAll('.rw-opt').forEach((c) => c.classList.toggle('on', c === card));
+      applyReadWidth(pickedWidth);
+    };
+  });
+
+  // -------------------------------------------------------------------------
+  // 叙事基调
+  // -------------------------------------------------------------------------
   let tone = state.tone;
   backdrop.querySelectorAll('.tone-opt').forEach((b) => {
     b.onclick = () => {
@@ -133,14 +314,6 @@ export async function openSettings(state, onChanged) {
    * 绑定一个「获取模型」按钮 + 搜索面板。
    * 用可搜索面板而不是原生 datalist：有的服务商一次返回几十个模型，
    * datalist 只能靠输入框前缀匹配，翻起来很痛苦。
-   *
-   * @param {string} btnSel     按钮选择器
-   * @param {string} panelSel   面板选择器
-   * @param {string} searchSel  搜索框选择器
-   * @param {string} listSel    列表容器选择器
-   * @param {string} hintSel    提示文案选择器
-   * @param {string} modelSel   模型输入框选择器
-   * @param {() => {url,key}} 取当前要用的地址与密钥
    */
   const bindFetchModels = (btnSel, panelSel, searchSel, listSel, hintSel, modelSel, getCreds) => {
     const btn = backdrop.querySelector(btnSel);
@@ -180,10 +353,8 @@ export async function openSettings(state, onChanged) {
       }
     };
 
-    // 搜索框实时过滤
     if (search) {
       search.oninput = renderList;
-      // 防止在搜索框里按 Enter 触发外层表单行为
       search.onkeydown = (e) => {
         if (e.key === 'Enter') { e.preventDefault(); renderList(); }
       };
@@ -229,7 +400,6 @@ export async function openSettings(state, onChanged) {
       hint.className = 'model-hint ok';
       hint.textContent = modelsHintText(all, input?.value?.trim() || '');
 
-      // 当前没填模型时，自动填第一个，省得再点一次
       if (input && !input.value.trim() && all.length) {
         input.value = all[0].id;
         renderList();
@@ -239,7 +409,6 @@ export async function openSettings(state, onChanged) {
     };
   };
 
-  // KP 模型：用主地址 + 主密钥
   bindFetchModels(
     '#btnFetchModels', '#modelPanel', '#modelSearch', '#modelList', '#modelHint', '#cfgModel',
     () => ({
@@ -248,7 +417,6 @@ export async function openSettings(state, onChanged) {
     })
   );
 
-  // 队友模型：优先用队友自己的地址/密钥，留空则回落到主配置
   bindFetchModels(
     '#btnFetchTeamModels', '#teamModelPanel', '#teamModelSearch', '#teamModelList', '#teamModelHint', '#cfgTeamModel',
     () => ({
@@ -272,7 +440,16 @@ export async function openSettings(state, onChanged) {
   autoBox.onchange = syncChance;
   syncChance();
 
-  const collect = () => ({    baseUrl: backdrop.querySelector('#cfgBaseUrl').value.trim(),
+  /**
+   * 收集面板上的全部设置。
+   *
+   * 注意 config:set 是**整体覆盖**而不是 patch 合并（见 electron/config.js），
+   * 所以这里必须把 uiTheme / readWidth 也带上。
+   * 漏掉的话保存模型配置时会把主题一起重置回默认值——
+   * 表现就是「改完 API 地址，配色也变回黄铜了」。
+   */
+  const collect = () => ({
+    baseUrl: backdrop.querySelector('#cfgBaseUrl').value.trim(),
     apiKey: backdrop.querySelector('#cfgApiKey').value.trim(),
     model: backdrop.querySelector('#cfgModel').value.trim(),
     temperature: parseFloat(backdrop.querySelector('#cfgTemp').value) || 0.8,
@@ -280,8 +457,11 @@ export async function openSettings(state, onChanged) {
     teammateBaseUrl: backdrop.querySelector('#cfgTeamBaseUrl').value.trim(),
     teammateApiKey: backdrop.querySelector('#cfgTeamApiKey').value.trim(),
     teammateModel: backdrop.querySelector('#cfgTeamModel').value.trim(),
-    tone
+    tone,
+    uiTheme: pickedTheme,
+    readWidth: pickedWidth
   });
+
   backdrop.querySelector('#btnTest').onclick = async () => {
     const res = backdrop.querySelector('#testRes');
     const c = collect();
@@ -323,6 +503,11 @@ export async function openSettings(state, onChanged) {
     state.teammateChance =
       (parseInt(backdrop.querySelector('#cfgTeammateChance').value, 10) || 0) / 100;
     state.teammateAutonomous = backdrop.querySelector('#cfgTeammateAutonomous').checked;
+
+    // 外观已经在预览时应用过了，这里只需要记住「保存过」以跳过回滚
+    state.uiTheme = c.uiTheme;
+    state.readWidth = c.readWidth;
+    saved = true;
 
     onChanged?.();
     close();

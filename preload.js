@@ -60,5 +60,67 @@ contextBridge.exposeInMainWorld('api', {
   openRuleBookExternal: () => ipcRenderer.invoke('rulebook:openExternal'),
 
   // 导出文本（跑团记录等）：弹保存对话框让玩家自己选位置
-  saveTextFile: (payload) => ipcRenderer.invoke('file:saveText', payload)
+  saveTextFile: (payload) => ipcRenderer.invoke('file:saveText', payload),
+
+  // -------------------------------------------------------------------------
+  // 联机
+  // -------------------------------------------------------------------------
+  net: {
+    // 开房 / 关房
+    hostStart: (opts) => ipcRenderer.invoke('net:hostStart', opts),
+    hostStop: () => ipcRenderer.invoke('net:hostStop'),
+    hostPlayers: () => ipcRenderer.invoke('net:hostPlayers'),
+    hostBroadcast: (payload) => ipcRenderer.invoke('net:hostBroadcast', payload),
+    hostSendTo: (payload) => ipcRenderer.invoke('net:hostSendTo', payload),
+    hostSetChar: (payload) => ipcRenderer.invoke('net:hostSetChar', payload),
+    hostFindByChar: (charId) => ipcRenderer.invoke('net:hostFindByChar', charId),
+
+    // 加入 / 离开
+    join: (opts) => ipcRenderer.invoke('net:join', opts),
+    leave: () => ipcRenderer.invoke('net:leave'),
+    send: (payload) => ipcRenderer.invoke('net:send', payload),
+    clientStatus: () => ipcRenderer.invoke('net:clientStatus'),
+
+    // 局域网发现
+    scanStart: () => ipcRenderer.invoke('net:scanStart'),
+    scanStop: () => ipcRenderer.invoke('net:scanStop'),
+    rooms: () => ipcRenderer.invoke('net:rooms'),
+    normalizeRoomCode: (input) => ipcRenderer.invoke('net:normalizeRoomCode', input),
+    localAddresses: () => ipcRenderer.invoke('net:localAddresses'),
+
+    shutdown: () => ipcRenderer.invoke('net:shutdown'),
+
+    // 房主侧事件
+    onPlayerJoined: sub('net:playerJoined'),
+    onPlayerOffline: sub('net:playerOffline'),
+    onPlayerReconnected: sub('net:playerReconnected'),
+    onClaim: sub('net:claim'),
+    onAction: sub('net:action'),
+    onRoll: sub('net:roll'),
+    onChat: sub('net:chat'),
+    onReady: sub('net:ready'),
+
+    // 客户端侧事件
+    onWelcome: sub('net:welcome'),
+    onMessage: sub('net:message'),
+    onServerError: sub('net:serverError'),
+    onClientError: sub('net:clientError'),
+    onFatal: sub('net:fatal'),
+    onHostGone: sub('net:hostGone'),
+    onDisconnected: sub('net:disconnected'),
+    onReconnecting: sub('net:reconnecting'),
+    onRooms: sub('net:rooms')
+  }
 });
+
+/**
+ * 订阅一个主进程推送的通道，返回取消订阅函数。
+ * 每个订阅都返回自己的解绑器，避免组件重渲染时监听器越堆越多。
+ */
+function sub(channel) {
+  return (cb) => {
+    const handler = (_e, data) => cb(data);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  };
+}

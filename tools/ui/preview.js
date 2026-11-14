@@ -9,13 +9,18 @@
 // 用法：浏览器打开 tools/ui/index.html（建议窗口拉到 1440 以上）
 //      ?view=setup    只测设定界面（默认）
 //      ?view=game     只测跑团界面
+//      ?theme=abyss   指定主题（brass / abyss / phosphor / blood）
+//      ?rw=wide       指定阅读宽度（narrow / normal / wide）
+//      ?collapse=left|right|both  验证侧栏折叠后的布局
 //      ?measure=1     把实测几何写进 DOM，供 --dump-dom 抓取核对
 // ---------------------------------------------------------------------------
 import { openGameSetup } from '../../src/modals/gameSetup.js';
+import { openSettings } from '../../src/modals/settings.js';
 import { createCharacter } from '../../src/core/character.js';
 import { createInitialState } from '../../src/state.js';
 import { renderAll, renderScene } from '../../src/ui/panels.js';
 import { renderAllMessages, initMessageScroll } from '../../src/ui/messages.js';
+import { applyTheme, applyReadWidth, THEMES } from '../../src/ui/theme.js';
 
 // 一份带公开简介的「已导入模组」，模拟 AI 整理后的产物
 const importedModule = {
@@ -49,6 +54,103 @@ window.api = {
 const params = new URLSearchParams(location.search);
 const view = params.get('view') || 'setup';
 
+// 主题与阅读宽度：支持 URL 参数，方便一次截图四种风格做对比
+applyTheme(params.get('theme'));
+applyReadWidth(params.get('rw'));
+
+// ---------------------------------------------------------------------------
+// 主界面（开始界面）：氛围层 + 母题 + 品牌区 + 菜单
+//
+// 为什么要在预览里复制一份结构而不是 fetch index.html：
+//   预览页是 file:// 打开的，fetch 同目录文件会被 CORS 拦掉。
+//   复制结构确实有「改了一边忘了另一边」的风险，所以这里只复制**结构和类名**，
+//   不复制任何内联样式——所有视觉都来自 styles.css，
+//   也就是说样式改错了这里一眼就能看出来。
+//   结构上的偏差由 tests/theme.test.mjs 的 HTML 契约检查兜住。
+// ---------------------------------------------------------------------------
+function mountStartView() {
+  const start = document.createElement('div');
+  start.id = 'startScreen';
+  start.className = 'start-screen';
+  start.innerHTML = `
+    <div class="start-atmo" aria-hidden="true">
+      <div class="atmo-motif"></div>
+      <div class="atmo-ring"></div>
+      <div class="atmo-ring atmo-ring-2"></div>
+      <div class="atmo-vignette"></div>
+      <span class="atmo-rune ar-1">✦</span>
+      <span class="atmo-rune ar-2">✧</span>
+      <span class="atmo-rune ar-3">❖</span>
+      <span class="atmo-rune ar-4">✶</span>
+      <span class="atmo-rune ar-5">✵</span>
+    </div>
+
+    <div class="start-inner">
+      <div class="start-brand">
+        <span class="start-sigil"><i class="sigil-shape"></i><i class="sigil-glyph"></i></span>
+        <h1>克苏鲁的呼唤</h1>
+        <span class="start-rule"></span>
+        <p class="start-sub">CALL OF CTHULHU · AI 守密人</p>
+      </div>
+
+      <nav class="start-menu">
+        <div class="start-progress" id="startProgress">
+          <span class="sp-dot"></span>
+          <div class="sp-body">
+            <div class="sp-line" id="spTitle">潮汐下的回声</div>
+            <div class="sp-line sp-dim" id="spMeta">北方港口小城 · 林默 · 第 7 轮</div>
+          </div>
+        </div>
+
+        <button class="menu-btn primary" id="menuStart">
+          <span class="mb-mark" aria-hidden="true"></span>
+          <span class="mb-label">开始</span>
+          <span class="mb-desc">开启一段新的调查</span>
+          <span class="mb-arrow" aria-hidden="true">→</span>
+        </button>
+
+        <button class="menu-btn online" id="menuOnline">
+          <span class="mb-mark" aria-hidden="true"></span>
+          <span class="mb-label">联机</span>
+          <span class="mb-desc">开房当守密人，或加入朋友的房间</span>
+          <span class="mb-arrow" aria-hidden="true">→</span>
+        </button>
+
+        <button class="menu-btn danger" id="menuAbandon">
+          <span class="mb-mark" aria-hidden="true"></span>
+          <span class="mb-label">放弃游戏</span>
+          <span class="mb-desc">清除当前进度，重新开始</span>
+          <span class="mb-arrow" aria-hidden="true">→</span>
+        </button>
+
+        <div class="menu-divider"><span class="md-gem" aria-hidden="true">◆</span></div>
+
+        <div class="menu-mini-row">
+          <button class="menu-mini">角色卡</button>
+          <button class="menu-mini">存档</button>
+          <button class="menu-mini">模组管理</button>
+          <button class="menu-mini">规则书</button>
+          <button class="menu-mini">设置</button>
+        </div>
+      </nav>
+
+      <div class="start-foot">
+        <span id="startModel" class="start-model">qwen2.5:14b</span>
+        <span class="start-sep">·</span>
+        <span class="start-note">COC 7th · 进度自动保存到本地</span>
+      </div>
+    </div>`;
+  document.body.appendChild(start);
+
+  // ?hover=1 时把第一张菜单卡片置于悬停态。
+  // 悬停效果（竖条点亮、箭头滑出、背景扫光）只有鼠标移上去才看得到，
+  // 截图工具没法真的悬停，所以用一个固定类来模拟——纯展示用途。
+  if (params.get('hover') === '1') {
+    const btn = document.querySelector('#menuStart');
+    if (btn) btn.classList.add('is-hover-preview');
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 跑团界面：直接复用真实的 state / 渲染函数，不经过 app.js 的事件绑定
 // ---------------------------------------------------------------------------
@@ -64,12 +166,15 @@ function mountGameView() {
   app.innerHTML = `
     <header class="topbar">
       <div class="brand">
-        <span class="sigil">◈</span>
+        <span class="sigil"></span>
         <span class="title">克苏鲁的呼唤</span>
         <span class="subtitle">AI 守密人</span>
       </div>
       <div class="top-actions">
         <span id="connStatus" class="conn-status">未配置</span>
+        <button class="btn ghost top-toggle" id="btnToggleLeft" title="折叠 / 展开左侧栏"></button>
+        <button class="btn ghost top-toggle" id="btnToggleRight" title="折叠 / 展开右侧栏"></button>
+        <span class="top-sep"></span>
         <button class="btn ghost" id="btnBackToMenu">‹ 主界面</button>
         <button class="btn ghost" id="btnModules">模组</button>
         <button class="btn ghost" id="btnSaves">存档</button>
@@ -144,6 +249,21 @@ function mountGameView() {
   renderAllMessages(state.messages);
   renderAll(state, {});
   renderScene(state);
+
+  // 折叠验证：?collapse=left|right|both
+  const collapse = params.get('collapse');
+  if (collapse) {
+    const layout = document.querySelector('.layout');
+    if (collapse === 'left' || collapse === 'both') {
+      layout.classList.add('hide-left');
+      document.querySelector('#btnToggleLeft')?.classList.add('off');
+    }
+    if (collapse === 'right' || collapse === 'both') {
+      layout.classList.add('hide-right');
+      document.querySelector('#btnToggleRight')?.classList.add('off');
+    }
+  }
+
   return state;
 }
 
@@ -152,6 +272,35 @@ function mountGameView() {
 // ---------------------------------------------------------------------------
 if (view === 'game') {
   mountGameView();
+} else if (view === 'start') {
+  mountStartView();
+} else if (view === 'settings') {
+  // 设置弹窗：验证 tab 切换与外观面板（主题卡片、阅读宽度）
+  //
+  // 预览页没有 Electron 的 preload，而 openSettings 第一步就是
+  // window.api.getConfig()。不铺桩的话会直接抛 TypeError，
+  // 整个模块静默失败、页面全白——这类问题截图上完全看不出来，
+  // 只能靠页面里的错误陷阱暴露。这里给最小可用的 api 桩。
+  const state = createInitialState();
+  state.apiConfig = { baseUrl: 'http://localhost:11434/v1', model: 'qwen2.5:14b', apiKey: '' };
+  globalThis.window.api = {
+    getConfig: async () => ({
+      baseUrl: 'http://localhost:11434/v1',
+      model: 'qwen2.5:14b',
+      apiKey: '',
+      uiTheme: params.get('theme') || 'brass',
+      readWidth: params.get('rw') || 'normal'
+    }),
+    setConfig: async () => ({ ok: true }),
+    listModels: async () => ({ ok: true, models: ['qwen2.5:14b', 'llama3.1:8b'] })
+  };
+  await openSettings(state, () => {});
+  // ?tab=theme 直接落到外观页，省得截图时还得模拟点击
+  const wantTab = params.get('tab');
+  if (wantTab) {
+    const btn = document.querySelector(`.st-tab[data-tab="${wantTab}"]`);
+    if (btn) btn.click();
+  }
 } else {
   const state = { apiConfig: {}, teammates: [], tone: '经典恐怖', module: null };
   await openGameSetup({
@@ -181,6 +330,20 @@ if (params.get('measure') === '1') {
     const vh = window.innerHeight;
     const report = { view, viewport: { w: vw, h: vh } };
 
+    // 主题与阅读宽度的实际生效值（从 <html> 的 data 属性读，
+    // 读的是浏览器真正采用的值，而不是我们以为传进去的值）
+    report.theme = document.documentElement.dataset.theme;
+    report.readWidth = document.documentElement.dataset.readWidth;
+    report.themeIds = THEMES.map((t) => t.id);
+    // --read-width 的实际计算值：验证 data-read-width 真的驱动了变量
+    report.readWidthPx = getComputedStyle(document.documentElement)
+      .getPropertyValue('--read-width')
+      .trim();
+    // 强调色实际计算值：验证主题真的换掉了颜色而不是只换了属性名
+    report.accent = getComputedStyle(document.documentElement)
+      .getPropertyValue('--accent')
+      .trim();
+
     if (view === 'game') {
       const layout = r('.layout');
       const left = r('.left-panel');
@@ -207,6 +370,11 @@ if (params.get('measure') === '1') {
       report.keeperBubble = kb;
       report.userBubble = ub;
       report.keeperLineLen = kb ? Math.round(kb.w / 15) : null; // 15px 字号粗估每行字数
+      // 折叠后中间区应该变宽（这是折叠功能存在的理由）
+      report.collapsed = {
+        left: document.querySelector('.layout')?.classList.contains('hide-left') || false,
+        right: document.querySelector('.layout')?.classList.contains('hide-right') || false
+      };
       // user 气泡应该贴右边：右边缘接近 messages 区右边缘
       report.userAlignedRight =
         ub && messages ? Math.abs(ub.x + ub.w - (messages.x + messages.w)) < 60 : null;

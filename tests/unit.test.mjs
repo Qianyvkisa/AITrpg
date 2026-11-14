@@ -1232,7 +1232,32 @@ group('randomCharacter 本地随机卡', () => {
   // 指定职业后这条断言才是确定的。
   const ch2 = randomCharacter({ name: '郑野', isPlayer: false, occupation: '私家侦探' });
   ok(ch2.occupation === '私家侦探', '指定职业被采用');
-  ok(ch2.skills['侦查'] > 25, '侦查被职业点抬高');
+
+  // 但**指定职业也不能保证侦查一定被抬高**：randomCharacter 只把
+  // 60% 的本职技能放进 prefer 列表，fillSkillPoints 按 prefer 分配点数，
+  // 侦查有 40% 概率落选，落选后就还是初始值 25。
+  // 实测这条断言约 4% 概率偶发失败（跑几百次必现），所以改成
+  // 「职业点确实被花掉了」这个与随机抽样无关的判据：
+  // 私家侦探的职业点一定大于 0，只要分配过，技能总和就必然高于初始总和。
+  const baseSum = Object.values(createCharacter({ name: 'x' }).skills)
+    .filter((v) => typeof v === 'number').reduce((a, b) => a + b, 0);
+  const chSum = Object.values(ch2.skills)
+    .filter((v) => typeof v === 'number').reduce((a, b) => a + b, 0);
+  ok(chSum > baseSum, '职业点被分配到技能上（总和高于初始）');
+
+  // 本职技能里至少有一部分被抬高：prefer 里固定放 60% 的职业池，
+  // 加上 fillSkillPoints 自己的补点，不可能一项都没动。
+  const occRaised = ['乔装', '侦查', '图书馆使用', '心理学', '法律']
+    .filter((n) => ch2.skills[n] > (createCharacter({ name: 'x' }).skills[n] ?? 0));
+  ok(occRaised.length > 0, '至少一项本职技能被职业点抬高');
+
+  // 反方向：跑多次，确认侦查确实**能**被抬高（不是永远落选）
+  let sawInvestigate = false;
+  for (let i = 0; i < 30 && !sawInvestigate; i++) {
+    const t = randomCharacter({ name: '郑野', isPlayer: false, occupation: '私家侦探' });
+    if (t.skills['侦查'] > 25) sawInvestigate = true;
+  }
+  ok(sawInvestigate, '多次随机中侦查能被职业点抬高');
 });
 
 group('buildSession 采用设定界面车好的卡', () => {

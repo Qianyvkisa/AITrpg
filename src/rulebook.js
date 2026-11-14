@@ -16,6 +16,7 @@
 //   两者都在 src/vendor/ 下随应用一起打包。
 // ---------------------------------------------------------------------------
 import { RULE_BOOK_PAGES, RULE_BOOK_TOTAL } from './core/ruleBookIndex.js';
+import { applyAppearance } from './ui/theme.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -294,6 +295,16 @@ async function init() {
   try {
     if (!window.api || !window.api.getRuleBookBase64) {
       throw new Error('这个环境里没有 Electron 接口（预览页？）');
+    }
+
+    // 规则书是独立 BrowserWindow，不共享主窗口的渲染进程状态，
+    // 所以主题要自己读一次配置。读失败就保持 index.html 上的兜底主题，
+    // 不能让配色问题挡住「看书」这件正事。
+    try {
+      const cfg = await window.api.getConfig();
+      applyAppearance(cfg);
+    } catch {
+      /* 忽略：保持 data-theme 兜底值 */
     }
 
     status.hidden = false;

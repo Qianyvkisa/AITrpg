@@ -1,10 +1,14 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="brass" data-read-width="normal">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'">
   <title>COC 跑团 · AI 守密人</title>
+  <!-- themes.css 必须先于 styles.css 加载：
+       styles.css 里 631 处 var() 引用主题变量，变量没定义时会回退成空值，
+       界面会整体失色。 -->
+  <link rel="stylesheet" href="themes.css">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -13,33 +17,77 @@
      主界面（程序开始界面）：开始 / 继续 / 存档 / 模组管理 / 设置
      ========================================================================= -->
 <div id="startScreen" class="start-screen">
+  <!-- 氛围层：全部是装饰，aria-hidden 且 pointer-events:none，不参与交互与朗读。
+       四套主题各自换一套母题（触手 / 水波 / 点阵 / 裂纹），
+       形状靠 CSS mask 提供，颜色跟 --accent 走。 -->
+  <div class="start-atmo" aria-hidden="true">
+    <div class="atmo-motif"></div>
+    <div class="atmo-ring"></div>
+    <div class="atmo-ring atmo-ring-2"></div>
+    <div class="atmo-vignette"></div>
+    <span class="atmo-rune ar-1">✦</span>
+    <span class="atmo-rune ar-2">✧</span>
+    <span class="atmo-rune ar-3">❖</span>
+    <span class="atmo-rune ar-4">✶</span>
+    <span class="atmo-rune ar-5">✵</span>
+  </div>
+
   <div class="start-inner">
     <div class="start-brand">
-      <span class="start-sigil">◈</span>
+      <!-- sigil 的形状由主题决定（菱形/圆/方/六边形），
+           内部符号由 --sigil-glyph 提供（◈ / ≈ / ▮ / ✶），
+           所以这里只留空壳，具体字符全交给 themes.css -->
+      <span class="start-sigil"><i class="sigil-shape"></i><i class="sigil-glyph"></i></span>
       <h1>克苏鲁的呼唤</h1>
       <span class="start-rule"></span>
       <p class="start-sub">CALL OF CTHULHU · AI 守密人</p>
     </div>
 
     <nav class="start-menu">
+      <!-- 进度信息条：有存档时显示这一局是谁、在哪个模组、跑到第几轮。
+           放在按钮上方而不是塞进「继续」的描述里——后者只有一行、
+           超出就被 ellipsis 截掉，玩家反而看不到关键信息。 -->
+      <div class="start-progress" id="startProgress" hidden>
+        <span class="sp-dot"></span>
+        <div class="sp-body">
+          <div class="sp-line" id="spTitle"></div>
+          <div class="sp-line sp-dim" id="spMeta"></div>
+        </div>
+      </div>
+
       <!-- 开始 与 继续 互斥：有进度时只显示「继续」，没有进度时才显示「开始」 -->
       <button class="menu-btn primary" id="menuStart">
+        <span class="mb-mark" aria-hidden="true"></span>
         <span class="mb-label">开始</span>
         <span class="mb-desc">开启一段新的调查</span>
+        <span class="mb-arrow" aria-hidden="true">→</span>
       </button>
 
       <button class="menu-btn primary" id="menuContinue" hidden>
+        <span class="mb-mark" aria-hidden="true"></span>
         <span class="mb-label">继续</span>
         <span class="mb-desc" id="menuContinueDesc"></span>
+        <span class="mb-arrow" aria-hidden="true">→</span>
+      </button>
+
+      <!-- 联机：与「单机开一局」并列的另一种进入方式，不是附属功能，
+           所以单独占一行卡片，而不是混在下面那排小按钮里 -->
+      <button class="menu-btn online" id="menuOnline">
+        <span class="mb-mark" aria-hidden="true"></span>
+        <span class="mb-label">联机</span>
+        <span class="mb-desc">开房当守密人，或加入朋友的房间</span>
+        <span class="mb-arrow" aria-hidden="true">→</span>
       </button>
 
       <!-- 放弃游戏：仅在存在进度时出现，清掉进度后回到「开始」状态 -->
       <button class="menu-btn danger" id="menuAbandon" hidden>
+        <span class="mb-mark" aria-hidden="true"></span>
         <span class="mb-label">放弃游戏</span>
         <span class="mb-desc">清除当前进度，重新开始</span>
+        <span class="mb-arrow" aria-hidden="true">→</span>
       </button>
 
-      <div class="menu-divider"></div>
+      <div class="menu-divider"><span class="md-gem" aria-hidden="true">◆</span></div>
 
       <div class="menu-mini-row">
         <button class="menu-mini" id="menuChars">角色卡</button>
@@ -65,13 +113,19 @@
 
   <header class="topbar">
     <div class="brand">
-      <span class="sigil">◈</span>
+      <span class="sigil"></span>
       <span class="title">克苏鲁的呼唤</span>
       <span class="subtitle">AI 守密人</span>
     </div>
     <div class="top-actions">
       <span id="connStatus" class="conn-status">未配置</span>
+      <!-- 侧栏折叠：宽屏下想专心读叙事时把两栏收起来。
+           放在品牌右侧、功能按钮左侧，和「操作」区分开 -->
+      <button class="btn ghost top-toggle" id="btnToggleLeft" title="折叠 / 展开左侧栏（Ctrl+[）" aria-label="折叠或展开左侧栏"></button>
+      <button class="btn ghost top-toggle" id="btnToggleRight" title="折叠 / 展开右侧栏（Ctrl+]）" aria-label="折叠或展开右侧栏"></button>
+      <span class="top-sep"></span>
       <button class="btn ghost" id="btnBackToMenu" title="回到主界面">‹ 主界面</button>
+      <button class="btn ghost" id="btnOnline" title="联机：开房或加入">联机</button>
       <button class="btn ghost" id="btnModules">模组</button>
       <button class="btn ghost" id="btnSaves">存档</button>
       <button class="btn ghost" id="btnSettings">设置</button>

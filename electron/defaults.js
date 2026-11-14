@@ -18,7 +18,14 @@ const DEFAULT_CONFIG = {
   teammateBaseUrl: '',
   teammateApiKey: '',
   teammateModel: '',
-  teammateTemperature: 0.9
+  teammateTemperature: 0.9,
+  // ---- 外观 ----
+  // 主题与阅读宽度属于「应用级外观」，不进存档：
+  // 换一个角色卡不该让界面配色跟着变，所以这两个字段只在 config.json 里。
+  // 合法值见 src/ui/theme.js 的 THEMES / READ_WIDTHS；
+  // 渲染层会做归一化，这里写错也只会回落到默认值，不会白屏。
+  uiTheme: 'brass',
+  readWidth: 'normal'
 };
 
 /**

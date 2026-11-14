@@ -25,11 +25,13 @@ import {
   replaceMessage
 } from './ui/messages.js';
 import { openSettings, openModules, openCharEditor, openTeammateCreator, openSaves, openGameSetup, openCharLibrary } from './modals/index.js';
+import { openOnline } from './modals/online.js';
 import { hasRunTurn, menuButtonVisibility } from './ui/menu.js';
 import { buildSession } from './core/session.js';
 import { createAutoAdvanceRunner } from './core/autoAdvanceRunner.js';
 import { openingFor } from './core/builtinModules.js';
 import { buildReplay, replayFileName } from './core/replay.js';
+import { applyAppearance } from './ui/theme.js';
 const $ = (sel) => document.querySelector(sel);
 
 const state = createInitialState();
@@ -56,9 +58,47 @@ function showStartScreen() {
   refreshStartScreen();
 }
 
+// ---------------------------------------------------------------------------
+// 侧栏折叠
+//
+// 折叠状态只存在 state 里，不写进 config：这是「这一会儿想专心读」的临时
+// 选择，下次启动应该回到完整三栏。也不进存档——存档是剧情快照，
+// 界面收没收起来跟剧情无关。
+// ---------------------------------------------------------------------------
+
+/** 把折叠状态同步到 DOM 与按钮外观 */
+function applyPanelVisibility() {
+  const layout = document.querySelector('.layout');
+  if (layout) {
+    layout.classList.toggle('hide-left', !!state.hideLeftPanel);
+    layout.classList.toggle('hide-right', !!state.hideRightPanel);
+  }
+  // 按钮高亮表示「这一栏现在被我收起来了」。
+  // 用 .off 而不是 .on：视觉上是「关掉了它」，语义比「打开了」清楚。
+  const left = $('#btnToggleLeft');
+  if (left) left.classList.toggle('off', !!state.hideLeftPanel);
+  const right = $('#btnToggleRight');
+  if (right) right.classList.toggle('off', !!state.hideRightPanel);
+}
+
+/**
+ * 折叠 / 展开某一侧。
+ * @param {'left'|'right'} side
+ */
+function togglePanel(side) {
+  if (side === 'left') state.hideLeftPanel = !state.hideLeftPanel;
+  else state.hideRightPanel = !state.hideRightPanel;
+  applyPanelVisibility();
+
+  // 折叠会让叙事区变宽，行宽变了但内容位置没动，滚动位置看起来会「跳一下」。
+  // 折起来的时候顺手回到底部：玩家折叠侧栏多半是想接着读最新内容。
+  if (state.hideLeftPanel || state.hideRightPanel) {
+    scrollToBottom({ force: true });
+  }
+}
+
 /** 进入跑团界面（重建消息流 + 全量重绘） */
-function enterGame() {
-  $('#startScreen').hidden = true;
+function enterGame() {  $('#startScreen').hidden = true;
   $('#app').hidden = false;
 
   // 开局后不再允许增删队友与调查员，避免破坏已跑起来的局面
@@ -73,6 +113,8 @@ function enterGame() {
   // 读档进来时可能还有没掷的骰，要把输入区锁上
   updateRollGate();
   updateTokenMeter();
+  // 折叠状态是运行时的，回主界面再进来要按 state 恢复
+  applyPanelVisibility();
   scrollToBottom({ force: true });
   $('#input')?.focus();
 }
@@ -394,14 +436,23 @@ async function refreshStartScreen() {
   $('#menuAbandon').hidden = !vis.abandon;
 
   if (hasProgress) {
-    const desc = $('#menuContinueDesc');
     const title = auto?.meta?.title || '自由创作';
     const scene = auto?.meta?.scene || snap?.scenario?.scene || '';
     const who = auto?.meta?.charName || snap?.playerChar?.name || '';
     const turns = auto?.meta?.turns ?? (snap?.messages || []).filter((m) => m.role === 'user').length;
-    desc.textContent = [title, scene, who, turns ? `第 ${turns} 轮` : '']
+
+    // 「继续」按钮上的描述只写动作，不重复上面进度条已经说过的模组/角色/轮数：
+    // 两处都写「埃莉诺·万斯 · 第 27 轮」是同一句话看两遍，反而挤占视觉空间。
+    $('#menuContinueDesc').textContent = '接着上次的进度继续调查';
+
+    // 详细信息放在按钮上方的进度条里，模组名与场景各占一行、可以换行显示
+    $('#spTitle').textContent = title;
+    $('#spMeta').textContent = [scene, who, turns ? `第 ${turns} 轮` : '尚未行动']
       .filter(Boolean)
       .join(' · ');
+    $('#startProgress').hidden = false;
+  } else {
+    $('#startProgress').hidden = true;
   }
 }
 
@@ -579,6 +630,7 @@ async function init() {
 
   initMessageScroll();
   bindUI();
+  bindNetEvents();
   showStartScreen();
 }
 
@@ -592,6 +644,240 @@ async function loadConfig() {
     maxTokens: cfg.maxTokens ?? 2048
   });
   state.tone = cfg.tone || '经典恐怖';
+
+  // 外观：主题与阅读宽度写在 <html> 的 data 属性上，CSS 自己按主题取变量。
+  // 这里拿到的可能是脏值（用户手改过 config.json），applyAppearance 内部会归一化。
+  const appearance = applyAppearance(cfg);
+  state.uiTheme = appearance.theme;
+  state.readWidth = appearance.readWidth;
+}
+
+// ---------------------------------------------------------------------------
+// 联机
+//
+// 分工：主进程持有 socket，这里只处理「界面上发生什么」。
+// 房主和客户端走同一套渲染——客户端收到 patch 后调的是同一个 renderMessage，
+// 不写第二份渲染逻辑，否则两边显示迟早会不一致。
+// ---------------------------------------------------------------------------
+let onlinePanel = null;
+
+/** 打开联机面板 */
+function openOnlinePanel() {
+  if (!window.api?.net) {
+    alert('联机需要在应用内使用。');
+    return;
+  }
+  onlinePanel = openOnline({
+    state,
+    onHosted: (info) => {
+      state.net.role = 'host';
+      state.net.roomCode = info.roomCode;
+      state.net.port = info.port;
+      state.net.host = info.address || '';
+      state.net.status = 'online';
+      engine?.pushMessage({
+        role: 'system',
+        text: `【联机】房间已开启，房间码 ${info.roomCode}。朋友在同一 WiFi 下点「加入」就能看到。`
+      });
+      renderAll(state, panelHandlers);
+    },
+    onJoined: (info) => {
+      state.net.role = 'client';
+      state.net.roomCode = info.roomCode || '';
+      state.net.myPlayerId = info.playerId || '';
+      state.net.status = 'online';
+      engine?.pushMessage({
+        role: 'system',
+        text: `【联机】已加入房间 ${info.roomCode || ''}，等待房主推进。`
+      });
+      renderAll(state, panelHandlers);
+    },
+    onLeft: () => {
+      state.net.role = null;
+      state.net.roomCode = '';
+      state.net.players = [];
+      state.net.status = 'offline';
+      renderAll(state, panelHandlers);
+    }
+  });
+}
+
+/**
+ * 装配联机事件监听。
+ * 只调一次——每次开面板都注册一遍的话，一次行动会触发好几次重绘。
+ */
+function bindNetEvents() {
+  const net = window.api?.net;
+  if (!net) return;
+
+  // ---- 房主侧：有人认领角色 ----
+  net.onClaim(({ player, charId }) => {
+    if (!state.net || state.net.role !== 'host') return;
+    // 先到先得：别人已经占了这个角色就拒绝，并告诉后来的人换一个
+    const existing = state.net.players.find((p) => p.charId === charId && p.id !== player.id);
+    if (existing) {
+      net.hostSendTo({
+        playerId: player.id,
+        type: 'error',
+        payload: { message: `角色已被 ${existing.name} 选走了，换一位吧` }
+      });
+      return;
+    }
+    net.hostSetChar({ playerId: player.id, charId });
+    engine?.pushMessage({
+      role: 'system',
+      text: `【联机】${player.name} 选择了角色。`
+    });
+  });
+
+  // ---- 房主侧：收到行动 ----
+  net.onAction(({ player, text }) => {
+    if (!state.net || state.net.role !== 'host') return;
+    // 行动文本前加上说话人，KP 才知道是谁在做什么。
+    // role 用 'user' 而不是 'player'：渲染器的 ROLE_LABELS 里玩家发言叫 user，
+    // 写 'player' 会掉进「不认识这个 role」的分支，标签显示成原文。
+    const line = state.net.players.length > 1 ? `[${player.name}] ${text}` : text;
+    engine?.pushMessage({ role: 'user', text: line });
+    renderAll(state, panelHandlers);
+  });
+
+  // ---- 房主侧：收到掷骰 ----
+  net.onRoll(({ player, pendingId }) => {
+    if (!state.net || state.net.role !== 'host') return;
+    handleRemoteRoll(player, pendingId);
+  });
+
+  // ---- 房主侧：场外聊天 ----
+  net.onChat(({ player, text }) => {
+    if (!state.net || state.net.role !== 'host') return;
+    // 用 system 而不是自造一个 ooc：渲染器只认 keeper/roll/system/player，
+    // 造新 role 会掉进默认分支，样式也不对
+    engine?.pushMessage({ role: 'system', text: `【场外】${player.name}：${text}` });
+    renderAll(state, panelHandlers);
+  });
+
+  // ---- 客户端侧：房主推来的消息 ----
+  net.onMessage((msg) => {
+    if (!state.net || state.net.role !== 'client') return;
+    handleHostMessage(msg);
+  });
+
+  net.onWelcome((info) => {
+    if (!state.net || state.net.role !== 'client') return;
+    state.net.myPlayerId = info.playerId;
+    state.net.roomCode = info.roomCode || state.net.roomCode;
+    state.net.status = 'online';
+    engine?.pushMessage({
+      role: 'system',
+      text: info.reconnected ? '【联机】已重新连上房主。' : '【联机】已连上房主。'
+    });
+    renderAll(state, panelHandlers);
+  });
+
+  net.onDisconnected(() => {
+    if (!state.net || state.net.role !== 'client') return;
+    state.net.status = 'reconnecting';
+    renderAll(state, panelHandlers);
+  });
+
+  net.onReconnecting(({ attempt }) => {
+    if (!state.net || state.net.role !== 'client') return;
+    state.net.status = 'reconnecting';
+    engine?.pushMessage({ role: 'system', text: `【联机】连接断开，正在重连（第 ${attempt} 次）…` });
+    renderAll(state, panelHandlers);
+  });
+
+  net.onHostGone((reason) => {
+    if (!state.net || state.net.role !== 'client') return;
+    state.net.role = null;
+    state.net.status = 'offline';
+    engine?.pushMessage({ role: 'system', text: `【联机】房主已离开房间：${reason}` });
+    renderAll(state, panelHandlers);
+  });
+
+  net.onServerError((message) => {
+    engine?.pushMessage({ role: 'system', text: `【联机】${message}` });
+    renderAll(state, panelHandlers);
+  });
+
+  net.onFatal((e) => {
+    state.net.role = null;
+    state.net.status = 'offline';
+    engine?.pushMessage({ role: 'system', text: `【联机】${e.message}` });
+    renderAll(state, panelHandlers);
+  });
+}
+
+/**
+ * 房主侧处理别人的掷骰请求。
+ * 权限校验：只能掷自己角色的骰，否则任何人都能替别人掷。
+ */
+function handleRemoteRoll(player, pendingId) {
+  const pending = engine?.pendingRolls?.() || [];
+  const target = pending.find((p) => p.id === pendingId);
+  if (!target) {
+    window.api.net.hostSendTo({
+      playerId: player.id,
+      type: 'error',
+      payload: { message: '这个掷骰已经失效了' }
+    });
+    return;
+  }
+  if (target.ownerId && target.ownerId !== player.id) {
+    window.api.net.hostSendTo({
+      playerId: player.id,
+      type: 'error',
+      payload: { message: '这不是你要掷的骰' }
+    });
+    return;
+  }
+  // 走和本机点击完全相同的路径，保证两边结果一致
+  handleRollClick(pendingId);
+}
+
+/** 客户端侧处理房主推来的消息 */
+function handleHostMessage(msg) {
+  switch (msg.t) {
+    case 'patch':
+      // 房主发来的是「新增的消息 + 状态」，直接套用
+      if (Array.isArray(msg.messages)) {
+        for (const m of msg.messages) engine?.pushMessage(m);
+      }
+      if (msg.state) applySnapshot(state, msg.state);
+      renderAll(state, panelHandlers);
+      break;
+
+    case 'stream':
+      // 流式正文：房主把「这条消息当前累计的全文」推过来，
+      // 这里复用本机同一套流式渲染。注意 scheduleStreamUpdate 收的是
+      // 消息对象本身（它会持续往 msg.text 追加），不是 id+delta。
+      if (msg.message) {
+        scheduleStreamUpdate(msg.message);
+      }
+      break;
+
+    case 'pending':
+      // 房主说该谁掷骰了
+      if (Array.isArray(msg.rolls)) {
+        for (const r of msg.rolls) {
+          if (r.ownerId === state.net.myPlayerId) {
+            engine?.pushMessage({ role: 'system', text: `【联机】轮到你了：${r.label || '掷骰'}` });
+          }
+        }
+        renderAll(state, panelHandlers);
+      }
+      break;
+
+    case 'players':
+      if (Array.isArray(msg.players)) {
+        state.net.players = msg.players;
+        renderAll(state, panelHandlers);
+      }
+      break;
+
+    default:
+      break;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -605,6 +891,7 @@ function bindUI() {
   $('#menuSaves').onclick = openSaveDialog;
   $('#menuChars').onclick = () => openCharLibrary({ state, api: window.api });
   $('#menuModules').onclick = () => openModules(state, () => renderAll(state, panelHandlers));
+  $('#menuOnline').onclick = openOnlinePanel;
   $('#menuRuleBook').onclick = async () => {
     // window.api 只在 Electron 里存在；浏览器里跑验证页时如实提示，不抛红字
     if (!window.api || !window.api.openRuleBook) {
@@ -635,7 +922,22 @@ function bindUI() {
   $('#btnModules').onclick = () =>
     openModules(state, () => { renderAll(state, panelHandlers); });
 
+  $('#btnOnline').onclick = openOnlinePanel;
+
   $('#btnSaves').onclick = openSaveDialog;
+
+  // ---- 侧栏折叠 ----
+  const toggleLeft = $('#btnToggleLeft');
+  if (toggleLeft) toggleLeft.onclick = () => togglePanel('left');
+  const toggleRight = $('#btnToggleRight');
+  if (toggleRight) toggleRight.onclick = () => togglePanel('right');
+
+  // Ctrl+[ / Ctrl+] 快捷键：宽屏下读长段叙事时不用去点顶栏
+  window.addEventListener('keydown', (e) => {
+    if (!e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.key === '[') { e.preventDefault(); togglePanel('left'); }
+    else if (e.key === ']') { e.preventDefault(); togglePanel('right'); }
+  });
 
   $('#btnSend').onclick = () => (state.mode === 'spectator' ? spectatorAdvance() : sendAction());
 
