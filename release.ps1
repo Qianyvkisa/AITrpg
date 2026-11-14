@@ -103,6 +103,19 @@ if ($Message -and ($Message -match 'v(\d+\.\d+\.\d+)')) {
 }
 # ---- 2. 打包 exe -----------------------------------------------------------
 Step 2 '打包 exe'
+
+# 打包前先关掉正在运行的实例。
+# 踩过的坑：Windows 会锁住正在执行的 exe，根目录那份被占用时
+# move-artifact 挪不动新产物，整条发布链在最后一步前功尽弃。
+$running = Get-Process -Name 'COC跑团' -ErrorAction SilentlyContinue
+if ($running) {
+  Write-Host "  关闭运行中的实例（$($running.Count) 个进程）" -ForegroundColor Yellow
+  $running | ForEach-Object { $_.Kill() }
+  Start-Sleep -Seconds 2
+  $still = Get-Process -Name 'COC跑团' -ErrorAction SilentlyContinue
+  if ($still) { Die '有实例关不掉，请手动结束进程后重试' }
+  Ok '已关闭'
+}
 # 本机代理有中间人证书，不加这个会报 unable to verify the first certificate
 $env:NODE_OPTIONS = '--use-system-ca'
 # 先应用自定义便携版启动器模板（跳过重复解压，让动画能立刻出现），再打包
@@ -115,7 +128,16 @@ if ($LASTEXITCODE -ne 0) { Die '移动产物失败' }
 $exe = Join-Path $root 'COC跑团.exe'
 if (-not (Test-Path $exe)) { Die '根目录没有生成 exe' }
 $sizeMB = [math]::Round((Get-Item $exe).Length / 1MB, 1)
-Ok "COC跑团.exe  ($sizeMB MB)"
+Ok "COC跑团.exe  ($sizeMB MB)  ->  项目根目录"
+
+# dist\ 顶层不允许留 exe：唯一产物必须在根目录。
+# move-artifact 已经清过一次，这里再兜底校验，防止将来脚本被改动后悄悄回退。
+$stray = Get-ChildItem (Join-Path $root 'dist') -Filter '*.exe' -File -ErrorAction SilentlyContinue
+if ($stray) {
+  $names = ($stray | ForEach-Object { $_.Name }) -join '、'
+  Die "dist\ 顶层还有 exe：$names。产物只应放在根目录，请清理后重试。"
+}
+Ok 'dist\ 顶层无 exe（仅保留 win-unpacked 供开发模式）'
 
 # ---- 3. 提交 ---------------------------------------------------------------
 Step 3 '提交改动'
