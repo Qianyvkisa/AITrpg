@@ -5,6 +5,7 @@
 // ---------------------------------------------------------------------------
 const path = require('path');
 const fs = require('fs');
+const { randomUUID } = require('crypto');
 const { app } = require('electron');
 
 function dataDir() {
@@ -32,9 +33,32 @@ function readJSON(name, fallback) {
   }
 }
 
-function writeJSON(name, value) {
-  fs.writeFileSync(fileOf(name), JSON.stringify(value, null, 2), 'utf8');
+function writeJSON(name, value, { backup = false } = {}) {
+  const target = fileOf(name);
+  const text = JSON.stringify(value, null, 2);
+  if (backup) {
+    const previous = readJSON(name, null);
+    if (previous !== null) replaceFile(`${target}.bak`, JSON.stringify(previous, null, 2));
+  }
+  replaceFile(target, text);
   return true;
+}
+
+/** 同目录临时文件写完再替换，异常退出时原文件仍然可读。 */
+function replaceFile(target, text) {
+  const temporary = `${target}.${randomUUID()}.tmp`;
+  try {
+    const fd = fs.openSync(temporary, 'wx');
+    try {
+      fs.writeFileSync(fd, text, 'utf8');
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(temporary, target);
+  } finally {
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+  }
 }
 
 function deleteFile(name) {

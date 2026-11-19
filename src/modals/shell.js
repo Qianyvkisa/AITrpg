@@ -48,16 +48,23 @@ function bindBackdropClose(backdrop, onClose) {
 /**
  * 打开一个弹窗。
  * @param html 弹窗内容（含 .modal 结构）
+ * @param {{onClose?: () => void}} [opts]
  * @returns { backdrop, close }
  */
-export function openModal(html) {
+export function openModal(html, { onClose } = {}) {
   const root = document.querySelector('#modalRoot');
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.innerHTML = html;
   root.appendChild(backdrop);
 
-  const close = () => backdrop.remove();
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    backdrop.remove();
+    onClose?.();
+  };
 
   // 关闭：点遮罩空白处（且不是框选拖出去）或带 data-close 的按钮
   bindBackdropClose(backdrop, close);

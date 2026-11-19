@@ -1564,13 +1564,13 @@ group('玩家 SAN 登记待掷骰，掷骰前不扣理智', () => {
   eq(player.san.current, 60, '掷骰前 SAN 不变');
 });
 
-group('玩家 SAN 掷骰后按 POW 判定并扣理智', () => {
+group('玩家 SAN 掷骰后按当前 SAN 判定并扣理智', () => {
   const { ctx, player } = makeRollCtx();
   const h = getHandler('SAN');
   const p = h(ctx, { head: '1/1d6', opts: {}, type: 'SAN' });
 
   const r = rollPending(ctx, p);
-  ok(r.powRoll, '有 POW 骰点');
+  ok(r.sanRoll, '有 SAN 骰点');
   ok(typeof r.loss === 'number' && r.loss >= 0, '损失为非负数');
   eq(r.before, 60, '记录扣减前的 SAN');
   eq(player.san.current, 60 - r.loss, 'SAN 已按损失扣减');

@@ -10,6 +10,7 @@
 // ---------------------------------------------------------------------------
 import { createRequire } from 'module';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 const require = createRequire(import.meta.url);
@@ -86,9 +87,7 @@ ok('标题不含控制字符', dirty.length === 0, dirty.slice(0, 2).map((x) => 
 // ---------------------------------------------------------------------------
 // 2) IPC 行为
 //
-// 注意：ruleBookPath() 是基于 electron/ 的真实目录算出来的，
-// 不能用临时目录伪造"文件缺失"场景——那样测的是假路径，不是真代码。
-// 所以这里直接验证真实文件的处理，外加一条可伪造的失败路径（openPath 报错）。
+// 便携版从 EXE 旁读取规则书。使用临时文件同时验证缺失和成功路径。
 // ---------------------------------------------------------------------------
 const handlers = {};
 const opened = [];
@@ -111,41 +110,50 @@ Module._load = function (request, parent, isMain) {
 const ipcFiles = require('../electron/ipc-files.js');
 ipcFiles.registerRuleBookIpc();
 
-// rulebook:path 指向真实存在的 PDF
-const info = await handlers['rulebook:path']();
-ok('rulebook:path 返回 ok:true', info.ok === true, JSON.stringify(info));
-ok('返回的是 file:// URL', String(info.url || '').startsWith('file://'), info.url);
-ok('URL 指向 coc-kp.pdf', String(info.url || '').includes('coc-kp.pdf'), info.url);
-ok('返回的 path 真实存在', fs.existsSync(info.path), info.path);
-// 打包后应优先取 app.asar.unpacked 里的那份（Chromium 的 PDF 插件读不了 asar）
-ok('开发态路径不含 app.asar', !String(info.path).includes('app.asar'), info.path);
+const portableDir = fs.mkdtempSync(path.join(os.tmpdir(), 'coc-rulebook-test-'));
+const assets = path.join(portableDir, 'assets');
+const pdfPath = path.join(assets, 'coc-kp.pdf');
+const pdf = Buffer.from('%PDF-1.4\n%%EOF\n');
+const previousPortableDir = process.env.PORTABLE_EXECUTABLE_DIR;
+process.env.PORTABLE_EXECUTABLE_DIR = portableDir;
 
-// openExternal 成功路径：真的把路径交给了 shell
-const ext1 = await handlers['rulebook:openExternal']();
-ok('文件存在时 openExternal 成功', ext1.ok === true, JSON.stringify(ext1));
-ok('openExternal 调用了 shell.openPath', opened.length === 1, `调用 ${opened.length} 次`);
-ok('交给 shell 的是同一个 PDF', String(opened[0] || '').includes('coc-kp.pdf'), opened[0]);
+try {
+  const missing = await handlers['rulebook:path']();
+  ok('缺少用户 PDF 时返回可读错误', !missing.ok && missing.error.includes(pdfPath));
+  fs.mkdirSync(assets);
+  fs.writeFileSync(pdfPath, pdf);
 
-// openPath 失败（返回非空字符串）时应转成 ok:false
-fakeElectron.shell.openPath = async () => '拒绝访问';
-const denied = await handlers['rulebook:openExternal']();
-ok('openPath 失败时转成 ok:false', denied.ok === false, JSON.stringify(denied));
-ok('失败原因被带出来', String(denied.error || '').includes('拒绝访问'), denied.error);
+  // rulebook:path 指向真实存在的 PDF
+  const info = await handlers['rulebook:path']();
+  ok('rulebook:path 返回 ok:true', info.ok === true, JSON.stringify(info));
+  ok('返回的是 file:// URL', String(info.url || '').startsWith('file://'), info.url);
+  ok('URL 指向 coc-kp.pdf', String(info.url || '').includes('coc-kp.pdf'), info.url);
+  ok('返回的 path 真实存在', fs.existsSync(info.path), info.path);
+  // 打包后应优先取 app.asar.unpacked 里的那份（Chromium 的 PDF 插件读不了 asar）
+  eq('路径指向便携 EXE 旁边的 PDF', info.path, pdfPath);
 
-// ---------------------------------------------------------------------------
-// 3) 项目里真有这份 PDF
-// ---------------------------------------------------------------------------
-const realPdf = path.join(process.cwd(), 'assets', 'coc-kp.pdf');
-ok('assets/coc-kp.pdf 存在', fs.existsSync(realPdf), realPdf);
-if (fs.existsSync(realPdf)) {
-  const size = fs.statSync(realPdf).size;
-  ok('PDF 大小在合理范围（>1MB）', size > 1024 * 1024, `${Math.round(size / 1024 / 1024)} MB`);
-  const head = fs.readFileSync(realPdf, { encoding: 'latin1', flag: 'r' }).slice(0, 5);
-  ok('PDF 文件头正确', head.startsWith('%PDF'), head);
+  // openExternal 成功路径：真的把路径交给了 shell
+  const ext1 = await handlers['rulebook:openExternal']();
+  ok('文件存在时 openExternal 成功', ext1.ok === true, JSON.stringify(ext1));
+  ok('openExternal 调用了 shell.openPath', opened.length === 1, `调用 ${opened.length} 次`);
+  ok('交给 shell 的是同一个 PDF', String(opened[0] || '').includes('coc-kp.pdf'), opened[0]);
+
+  // openPath 失败（返回非空字符串）时应转成 ok:false
+  fakeElectron.shell.openPath = async () => '拒绝访问';
+  const denied = await handlers['rulebook:openExternal']();
+  ok('openPath 失败时转成 ok:false', denied.ok === false, JSON.stringify(denied));
+  ok('失败原因被带出来', String(denied.error || '').includes('拒绝访问'), denied.error);
+
+  const encoded = await handlers['rulebook:base64']();
+  eq('PDF 字节可通过 IPC 读取', encoded.data, pdf.toString('base64'));
+} finally {
+  if (previousPortableDir === undefined) delete process.env.PORTABLE_EXECUTABLE_DIR;
+  else process.env.PORTABLE_EXECUTABLE_DIR = previousPortableDir;
+  Module._load = origLoad;
+  fs.rmSync(pdfPath, { force: true });
+  if (fs.existsSync(assets)) fs.rmdirSync(assets);
+  fs.rmdirSync(portableDir);
 }
-
-// 还原 Module 钩子，避免影响后续
-Module._load = origLoad;
 
 // ---------------------------------------------------------------------------
 // 汇总

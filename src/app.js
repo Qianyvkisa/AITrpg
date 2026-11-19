@@ -32,6 +32,7 @@ import { createAutoAdvanceRunner } from './core/autoAdvanceRunner.js';
 import { openingFor } from './core/builtinModules.js';
 import { buildReplay, replayFileName } from './core/replay.js';
 import { applyAppearance } from './ui/theme.js';
+import { applyRoomState, claimedCharacter, mergeRoomMessages, publicMessage, publicRoomState, rollOwner, roomHistory } from './core/onlineSession.js';
 const $ = (sel) => document.querySelector(sel);
 
 const state = createInitialState();
@@ -56,6 +57,7 @@ function showStartScreen() {
   // 回到开始界面：重新放开「加队友 / 加调查员」，这时还能调整队伍
   applyEditingLock(false);
   refreshStartScreen();
+  publishRoomState({ reset: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -117,6 +119,7 @@ function enterGame() {  $('#startScreen').hidden = true;
   applyPanelVisibility();
   scrollToBottom({ force: true });
   $('#input')?.focus();
+  publishRoomState({ reset: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -304,7 +307,7 @@ function toggleAutoAdvance() {
 
 /** 旁观模式下「推进」：没有输入内容时给 KP 一个默认的推进指令 */
 async function spectatorAdvance(opts = {}) {
-  if (busy) return;
+  if (busy || hasPendingRoll() || state.net.role === 'client') return;
 
   // 手动推进时先把挂起的自动推进取消，避免紧接着又触发一次
   if (!opts.fromAuto) {
@@ -315,6 +318,7 @@ async function spectatorAdvance(opts = {}) {
   }
 
   const input = $('#input');
+  const retry = state.keeperContinuation;
   // 玩家没输入就点「推进」时，用一句占位语催 KP 往下走。
   // 这句话**不该显示在界面上**——它不是玩家说的话，摆出来很出戏
   // （玩家会看到自己"说"了一句从没打过的话）。
@@ -323,8 +327,10 @@ async function spectatorAdvance(opts = {}) {
   const text = typed || '（继续推进剧情，让调查员们继续行动）';
   // 只有程序补的占位语才隐藏；玩家自己打了字就正常显示
   const hiddenPlaceholder = !typed;
-  input.value = '';
-  input.style.height = 'auto';
+  if (!retry) {
+    input.value = '';
+    input.style.height = 'auto';
+  }
 
   busy = true;
   const btn = $('#btnSend');
@@ -357,7 +363,7 @@ async function spectatorAdvance(opts = {}) {
     }
     // 这一轮成功：清零失败计数，下次故障重新有完整的重试预算
     autoRunner.noteSuccess();
-    state.turns = (state.turns || 0) + 1;
+    if (!retry) state.turns = (state.turns || 0) + 1;
     await autoSave();
   } catch (e) {
     console.error(e);
@@ -460,9 +466,9 @@ async function refreshStartScreen() {
 function resetGameState() {
   const keepApiConfig = state.apiConfig;
   const keepTone = state.tone;
+  const { net, netName, uiTheme, readWidth } = state;
   Object.assign(state, createInitialState());
-  state.apiConfig = keepApiConfig;
-  state.tone = keepTone;
+  Object.assign(state, { net, netName, uiTheme, readWidth, apiConfig: keepApiConfig, tone: keepTone });
 }
 
 // ---------------------------------------------------------------------------
@@ -495,6 +501,7 @@ function handleEngineEvent(ev) {
     case 'message':
       renderMessage(ev.message);
       scrollToBottom();
+      publishRoomMessage(ev.message);
       break;
 
     case 'stream-chunk': {
@@ -516,6 +523,7 @@ function handleEngineEvent(ev) {
       } else {
         applyCleanText(ev.message);
       }
+      publishRoomMessage(ev.message);
       break;
 
     case 'roll-pending':
@@ -526,6 +534,7 @@ function handleEngineEvent(ev) {
     case 'state-changed':
       renderAll(state, panelHandlers);
       updateRollGate();
+      publishRoomState();
       break;
 
     default:
@@ -537,7 +546,12 @@ function handleEngineEvent(ev) {
 // 面板交互回调（面板只负责显示，动作由这里提供）
 // ---------------------------------------------------------------------------
 const panelHandlers = {
-  onEdit: (ch) => openCharEditor(state, ch, () => renderAll(state, panelHandlers)),
+  onEdit: (ch) => {
+    if (state.net.role !== 'client' && !busy) openCharEditor(state, ch, () => {
+      renderAll(state, panelHandlers);
+      publishRoomState();
+    });
+  },
   onRemove: (t) => {
     state.teammates = state.teammates.filter((x) => x.id !== t.id);
     renderAll(state, panelHandlers);
@@ -565,29 +579,48 @@ function updateRollGate() {
   const input = $('#input');
   const pending = hasPendingRoll();
   state.awaitingRoll = pending;
+  const client = state.net.role === 'client';
+  const room = state.net.room;
+  const own = client && claimedCharacter(state, state.net.myPlayerId);
+  const retry = !client && state.keeperContinuation;
+  const clientHint = !client ? ''
+    : state.net.status !== 'online' ? '正在连接房主…'
+    : !room?.ready ? '等待房主进入调查…'
+    : !own ? '在「联机」中选择一位调查员…'
+    : room.busy || room.continuation ? '等待房主继续叙事…' : '';
+  const disabled = !!clientHint || pending || busy || state.scenario.ended;
 
   if (sendBtn) {
-    sendBtn.disabled = pending || busy;
-    sendBtn.textContent = pending ? '先掷骰' : (state.mode === 'spectator' ? '推进' : '行动');
+    sendBtn.disabled = disabled;
+    sendBtn.textContent = pending ? '先掷骰' : retry ? '继续叙事' : (state.mode === 'spectator' ? '推进' : '行动');
   }
   if (input) {
-    input.disabled = pending;
-    input.placeholder = pending
-      ? '请先点「掷骰」完成上面的检定…'
-      : '描述你的行动…';
+    input.disabled = !!clientHint || pending || state.scenario.ended || retry;
+    input.placeholder = clientHint || (pending ? '等待对应调查员完成检定…'
+      : retry ? '请继续守密人的叙事…' : '描述你的行动…');
+  }
+  const pendingRolls = pending ? new Map(engine.pendingRolls().map((roll) => [roll.id, roll])) : new Map();
+  for (const button of document.querySelectorAll('.roll-btn')) {
+    const roll = pendingRolls.get(button.dataset.rollId);
+    if (!roll) continue;
+    const allowed = canRoll(roll);
+    button.disabled = busy || (client && (room?.busy || state.net.status !== 'online')) || !allowed;
+    button.title = allowed ? '' : `等待 ${roll.who} 的玩家掷骰`;
   }
 }
 
 /** 处理掷骰按钮点击 */
-async function handleRollClick(rollId) {
+async function handleRollClick(rollId, playerId = '') {
   if (!rollId || busy) return;
   if (!engine) return;
 
   const target = engine.pendingRolls().find((p) => p.id === rollId);
-  if (!target) return;
+  if (!target || !canRoll(target, playerId)) return;
+  if (state.net.role === 'client') return sendRoomRequest('roll', { pendingId: rollId });
 
   busy = true;
   updateRollGate();
+  publishRoomState();
 
   try {
     await engine.rollAndResume(rollId);
@@ -598,6 +631,7 @@ async function handleRollClick(rollId) {
   } finally {
     busy = false;
     updateRollGate();
+    publishRoomState();
     scrollToBottom();
     // 掷骰完成后如果自动推进还开着，把被 pending-roll 挡住的推进接上。
     // 放在这里（而不是 updateRollGate 里）是因为 updateRollGate 在进游戏、
@@ -613,6 +647,8 @@ async function init() {
   await loadConfig();
 
   engine = new GameEngine(state, window.api);
+  engine.checkpoint = autoSave;
+  engine.rollOwner = (character) => rollOwner(state, character);
   engine.on(handleEngineEvent);
   // 引擎每轮结束后会让队友自发接话，具体怎么调 LLM 由这里提供
   engine.setTeammateSpeaker(() => teammateSpeak({ fromEngine: true }));
@@ -653,16 +689,85 @@ async function loadConfig() {
 }
 
 // ---------------------------------------------------------------------------
-// 联机
-//
-// 分工：主进程持有 socket，这里只处理「界面上发生什么」。
-// 房主和客户端走同一套渲染——客户端收到 patch 后调的是同一个 renderMessage，
-// 不写第二份渲染逻辑，否则两边显示迟早会不一致。
+// 联机：房主运行引擎，客户端只发送意图并显示公开状态
 // ---------------------------------------------------------------------------
 let onlinePanel = null;
+let localSession = null;
 
-/** 打开联机面板 */
+function hostGameReady() {
+  return !$('#app').hidden && state.mode === 'player' && !!state.playerChar;
+}
+
+function roomSend(payload, playerId) {
+  const net = window.api.net;
+  const request = playerId
+    ? net.hostSendTo({ playerId, ...payload })
+    : net.hostBroadcast(payload);
+  request.catch(console.error);
+}
+
+function publishRoomState({ reset = false, playerId } = {}) {
+  if (state.net.role !== 'host') return;
+  const ready = hostGameReady();
+  const payload = { state: publicRoomState(state, { ready, busy }) };
+  if (reset) {
+    payload.reset = true;
+    payload.players = state.net.players;
+    payload.messages = ready ? roomHistory(state) : [];
+  }
+  roomSend({ type: 'patch', payload }, playerId);
+}
+
+function publishRoomMessage(message) {
+  if (state.net.role !== 'host' || !hostGameReady()) return;
+  const visible = publicMessage(state, message);
+  if (visible) roomSend({ type: 'patch', payload: { messages: [visible] } });
+}
+
+function canRoll(roll, playerId = '') {
+  if (state.net.role === 'client') {
+    return !!roll.ownerId && roll.ownerId === state.net.myPlayerId;
+  }
+  const owner = rollOwner(state, engine.findCharById(roll.charId) || engine.findChar(roll.who));
+  return owner === playerId;
+}
+
+async function sendRoomRequest(kind, payload) {
+  if (state.net.status !== 'online') return false;
+  try {
+    const res = await window.api.net.send({ kind, payload });
+    if (res.ok) return true;
+    alert(res.error || '发送失败，请确认与房主的连接。');
+  } catch (e) {
+    alert(e.message);
+  }
+  return false;
+}
+
+function syncClientControls() {
+  const client = state.net.role === 'client';
+  $('#btnAuto').disabled = client;
+  $('#btnModules').disabled = client;
+  $('#btnSaves').disabled = client;
+  updateRollGate();
+}
+
+function leaveRoomView(reason) {
+  const wasClient = state.net.role === 'client';
+  Object.assign(state.net, { role: null, room: null, roomCode: '', players: [], status: 'offline', myPlayerId: '' });
+  if (wasClient) {
+    const returning = localSession;
+    localSession = null;
+    if (returning) applySnapshot(state, returning.snapshot);
+    if (returning?.inGame) enterGame();
+    else showStartScreen();
+    if (reason) alert(reason);
+  }
+  syncClientControls();
+}
+
 function openOnlinePanel() {
+  if (busy) { alert('请等守密人结束这段叙事。'); return; }
   if (!window.api?.net) {
     alert('联机需要在应用内使用。');
     return;
@@ -670,214 +775,163 @@ function openOnlinePanel() {
   onlinePanel = openOnline({
     state,
     onHosted: (info) => {
-      state.net.role = 'host';
-      state.net.roomCode = info.roomCode;
-      state.net.port = info.port;
-      state.net.host = info.address || '';
-      state.net.status = 'online';
-      engine?.pushMessage({
-        role: 'system',
-        text: `【联机】房间已开启，房间码 ${info.roomCode}。朋友在同一 WiFi 下点「加入」就能看到。`
-      });
-      renderAll(state, panelHandlers);
+      Object.assign(state.net, { role: 'host', roomCode: info.roomCode, port: info.port, host: info.address || '', status: 'online' });
+      syncClientControls();
     },
     onJoined: (info) => {
-      state.net.role = 'client';
-      state.net.roomCode = info.roomCode || '';
-      state.net.myPlayerId = info.playerId || '';
-      state.net.status = 'online';
-      engine?.pushMessage({
-        role: 'system',
-        text: `【联机】已加入房间 ${info.roomCode || ''}，等待房主推进。`
-      });
-      renderAll(state, panelHandlers);
+      if (busy) {
+        window.api.net.leave().catch(console.error);
+        alert('请等守密人结束这段叙事后重新连接。');
+        return;
+      }
+      localSession = { snapshot: buildSnapshot(state), inGame: !$('#app').hidden };
+      resetGameState();
+      stopAutoAdvance(null);
+      Object.assign(state.net, { role: 'client', roomCode: info.roomCode, myPlayerId: info.playerId, status: 'online', room: null, players: [] });
+      enterGame();
+      syncClientControls();
+      sendRoomRequest('ready');
     },
-    onLeft: () => {
-      state.net.role = null;
-      state.net.roomCode = '';
-      state.net.players = [];
-      state.net.status = 'offline';
-      renderAll(state, panelHandlers);
-    }
+    onLeft: () => leaveRoomView(),
+    onClaim: (charId) => sendRoomRequest('claim', { charId })
   });
 }
 
-/**
- * 装配联机事件监听。
- * 只调一次——每次开面板都注册一遍的话，一次行动会触发好几次重绘。
- */
+async function refreshRoomPlayers() {
+  const result = await window.api.net.hostPlayers();
+  if (state.net.role !== 'host' || !result.ok) return;
+  state.net.players = result.players;
+  updateRollGate();
+}
+
 function bindNetEvents() {
   const net = window.api?.net;
   if (!net) return;
 
-  // ---- 房主侧：有人认领角色 ----
-  net.onClaim(({ player, charId }) => {
-    if (!state.net || state.net.role !== 'host') return;
-    // 先到先得：别人已经占了这个角色就拒绝，并告诉后来的人换一个
-    const existing = state.net.players.find((p) => p.charId === charId && p.id !== player.id);
-    if (existing) {
-      net.hostSendTo({
-        playerId: player.id,
-        type: 'error',
-        payload: { message: `角色已被 ${existing.name} 选走了，换一位吧` }
-      });
-      return;
+  net.onClaim(async ({ player, charId }) => {
+    if (state.net.role !== 'host') return;
+    if (!hostGameReady() || busy || hasPendingRoll() || state.keeperContinuation) {
+      return roomError(player.id, '请等这一轮结束再选择角色。');
     }
-    net.hostSetChar({ playerId: player.id, charId });
-    engine?.pushMessage({
-      role: 'system',
-      text: `【联机】${player.name} 选择了角色。`
-    });
+    if (!state.teammates.some((ch) => ch.id === charId)) {
+      return roomError(player.id, '请在房主的队友中选择一位调查员。');
+    }
+    busy = true;
+    updateRollGate();
+    try {
+      const result = await net.hostSetChar({ playerId: player.id, charId });
+      if (!result.ok) return roomError(player.id, '这位调查员已被认领。');
+      await refreshRoomPlayers();
+    } catch (e) {
+      roomError(player.id, e.message);
+    } finally {
+      busy = false;
+      updateRollGate();
+      publishRoomState();
+    }
   });
 
-  // ---- 房主侧：收到行动 ----
+  net.onReady(async ({ player }) => {
+    if (state.net.role !== 'host') return;
+    await refreshRoomPlayers();
+    publishRoomState({ reset: true, playerId: player.id });
+  });
+
+  net.onPlayerOffline(async () => {
+    if (state.net.role !== 'host') return;
+    const before = state.net.players.length;
+    await refreshRoomPlayers();
+    if (state.net.players.length < before && hasPendingRoll()) publishRoomState({ reset: true });
+  });
+
   net.onAction(({ player, text }) => {
-    if (!state.net || state.net.role !== 'host') return;
-    // 行动文本前加上说话人，KP 才知道是谁在做什么。
-    // role 用 'user' 而不是 'player'：渲染器的 ROLE_LABELS 里玩家发言叫 user，
-    // 写 'player' 会掉进「不认识这个 role」的分支，标签显示成原文。
-    const line = state.net.players.length > 1 ? `[${player.name}] ${text}` : text;
-    engine?.pushMessage({ role: 'user', text: line });
-    renderAll(state, panelHandlers);
+    if (state.net.role !== 'host') return;
+    const actor = claimedCharacter(state, player.id);
+    if (!hostGameReady() || !actor || actor.id !== player.charId) {
+      return roomError(player.id, '请先在联机面板认领房主队伍中的调查员。');
+    }
+    if (busy || hasPendingRoll() || state.keeperContinuation || state.scenario.ended) {
+      return roomError(player.id, '本轮暂时不能行动，请等待当前叙事或检定结束。');
+    }
+    runPlayerTurn(`[${actor.name}（${player.name}）] ${text}`, { actorId: actor.id });
   });
 
-  // ---- 房主侧：收到掷骰 ----
   net.onRoll(({ player, pendingId }) => {
-    if (!state.net || state.net.role !== 'host') return;
-    handleRemoteRoll(player, pendingId);
+    if (state.net.role !== 'host') return;
+    const roll = engine.pendingRolls().find((entry) => entry.id === pendingId);
+    if (!hostGameReady() || busy || !roll || !canRoll(roll, player.id)) {
+      return roomError(player.id, '这个检定当前不能由你掷骰。');
+    }
+    handleRollClick(pendingId, player.id);
   });
 
-  // ---- 房主侧：场外聊天 ----
   net.onChat(({ player, text }) => {
-    if (!state.net || state.net.role !== 'host') return;
-    // 用 system 而不是自造一个 ooc：渲染器只认 keeper/roll/system/player，
-    // 造新 role 会掉进默认分支，样式也不对
-    engine?.pushMessage({ role: 'system', text: `【场外】${player.name}：${text}` });
-    renderAll(state, panelHandlers);
+    if (state.net.role !== 'host') return;
+    engine.pushMessage({ role: 'system', text: `【场外】${player.name}：${text}` });
   });
 
-  // ---- 客户端侧：房主推来的消息 ----
   net.onMessage((msg) => {
-    if (!state.net || state.net.role !== 'client') return;
-    handleHostMessage(msg);
+    if (state.net.role === 'client') handleHostMessage(msg);
   });
 
   net.onWelcome((info) => {
-    if (!state.net || state.net.role !== 'client') return;
-    state.net.myPlayerId = info.playerId;
-    state.net.roomCode = info.roomCode || state.net.roomCode;
-    state.net.status = 'online';
-    engine?.pushMessage({
-      role: 'system',
-      text: info.reconnected ? '【联机】已重新连上房主。' : '【联机】已连上房主。'
-    });
-    renderAll(state, panelHandlers);
+    if (state.net.role !== 'client') return;
+    Object.assign(state.net, { status: 'online', myPlayerId: info.playerId, roomCode: info.roomCode || state.net.roomCode });
+    updateRollGate();
+    sendRoomRequest('ready');
   });
 
-  net.onDisconnected(() => {
-    if (!state.net || state.net.role !== 'client') return;
+  net.onDisconnected(({ willRetry } = {}) => {
+    if (state.net.role !== 'client' || willRetry === false) return;
     state.net.status = 'reconnecting';
-    renderAll(state, panelHandlers);
-  });
-
-  net.onReconnecting(({ attempt }) => {
-    if (!state.net || state.net.role !== 'client') return;
-    state.net.status = 'reconnecting';
-    engine?.pushMessage({ role: 'system', text: `【联机】连接断开，正在重连（第 ${attempt} 次）…` });
-    renderAll(state, panelHandlers);
+    updateRollGate();
+    onlinePanel?.refreshRoom();
   });
 
   net.onHostGone((reason) => {
-    if (!state.net || state.net.role !== 'client') return;
-    state.net.role = null;
-    state.net.status = 'offline';
-    engine?.pushMessage({ role: 'system', text: `【联机】房主已离开房间：${reason}` });
-    renderAll(state, panelHandlers);
+    if (state.net.role === 'client') leaveRoomView(`房间已关闭：${reason}`);
   });
 
   net.onServerError((message) => {
-    engine?.pushMessage({ role: 'system', text: `【联机】${message}` });
-    renderAll(state, panelHandlers);
+    if (state.net.role === 'client') {
+      engine.pushMessage({ role: 'system', text: `【联机】${message}` });
+      updateRollGate();
+    }
   });
 
-  net.onFatal((e) => {
-    state.net.role = null;
-    state.net.status = 'offline';
-    engine?.pushMessage({ role: 'system', text: `【联机】${e.message}` });
-    renderAll(state, panelHandlers);
+  net.onFatal((error) => {
+    if (state.net.role === 'client') leaveRoomView(error.message);
   });
 }
 
-/**
- * 房主侧处理别人的掷骰请求。
- * 权限校验：只能掷自己角色的骰，否则任何人都能替别人掷。
- */
-function handleRemoteRoll(player, pendingId) {
-  const pending = engine?.pendingRolls?.() || [];
-  const target = pending.find((p) => p.id === pendingId);
-  if (!target) {
-    window.api.net.hostSendTo({
-      playerId: player.id,
-      type: 'error',
-      payload: { message: '这个掷骰已经失效了' }
-    });
-    return;
-  }
-  if (target.ownerId && target.ownerId !== player.id) {
-    window.api.net.hostSendTo({
-      playerId: player.id,
-      type: 'error',
-      payload: { message: '这不是你要掷的骰' }
-    });
-    return;
-  }
-  // 走和本机点击完全相同的路径，保证两边结果一致
-  handleRollClick(pendingId);
+function roomError(playerId, message) {
+  roomSend({ type: 'error', payload: { message } }, playerId);
 }
 
-/** 客户端侧处理房主推来的消息 */
 function handleHostMessage(msg) {
-  switch (msg.t) {
-    case 'patch':
-      // 房主发来的是「新增的消息 + 状态」，直接套用
-      if (Array.isArray(msg.messages)) {
-        for (const m of msg.messages) engine?.pushMessage(m);
-      }
-      if (msg.state) applySnapshot(state, msg.state);
-      renderAll(state, panelHandlers);
-      break;
-
-    case 'stream':
-      // 流式正文：房主把「这条消息当前累计的全文」推过来，
-      // 这里复用本机同一套流式渲染。注意 scheduleStreamUpdate 收的是
-      // 消息对象本身（它会持续往 msg.text 追加），不是 id+delta。
-      if (msg.message) {
-        scheduleStreamUpdate(msg.message);
-      }
-      break;
-
-    case 'pending':
-      // 房主说该谁掷骰了
-      if (Array.isArray(msg.rolls)) {
-        for (const r of msg.rolls) {
-          if (r.ownerId === state.net.myPlayerId) {
-            engine?.pushMessage({ role: 'system', text: `【联机】轮到你了：${r.label || '掷骰'}` });
-          }
-        }
-        renderAll(state, panelHandlers);
-      }
-      break;
-
-    case 'players':
-      if (Array.isArray(msg.players)) {
-        state.net.players = msg.players;
-        renderAll(state, panelHandlers);
-      }
-      break;
-
-    default:
-      break;
+  if (msg.t === 'players' && Array.isArray(msg.players)) {
+    state.net.players = msg.players;
+    if (state.net.room) applyRoomState(state, state.net.room);
+    renderAll(state, panelHandlers);
+    updateRollGate();
+    onlinePanel?.refreshRoom();
+    return;
   }
+  if (msg.t !== 'patch') return;
+
+  const previous = state.net.room;
+  if (Array.isArray(msg.players)) state.net.players = msg.players;
+  if (msg.state) applyRoomState(state, msg.state);
+  const changes = mergeRoomMessages(state, msg.messages, msg.reset);
+  if (msg.reset) renderAllMessages(state.messages);
+  else for (const { message, updated } of changes) {
+    if (updated) replaceMessage(message);
+    else renderMessage(message);
+  }
+  if (changes.length || msg.reset) scrollToBottom();
+  if (msg.state || msg.reset) renderAll(state, panelHandlers);
+  updateRollGate();
+  if (msg.reset || previous?.ready !== state.net.room?.ready) onlinePanel?.refreshRoom();
 }
 
 // ---------------------------------------------------------------------------
@@ -911,6 +965,7 @@ function bindUI() {
   // ---- 跑团界面 ----
   $('#btnBackToMenu').onclick = () => {
     if (busy) { alert('守密人正在叙述，稍等一下再回主界面。'); return; }
+    if (state.net.role === 'client') { openOnlinePanel(); return; }
     // 回主界面必须停掉自动推进，否则会在后台继续发请求烧 token
     stopAutoAdvance(null);
     showStartScreen();
@@ -990,6 +1045,7 @@ function bindUI() {
 
 /** 存档弹窗（主界面与跑团界面共用；读档后直接进入跑团界面） */
 function openSaveDialog() {
+  if (busy || state.net.role === 'client') return;
   openSaves({
     // 还没行动过就没有进度可存，隐藏「保存当前进度」
     allowSave: hasRunTurn(state),
@@ -1088,7 +1144,7 @@ async function abandonGame() {
 // 玩家行动
 // ---------------------------------------------------------------------------
 async function sendAction() {
-  if (busy) return;
+  if (busy || state.scenario.ended) return;
 
   // 有未掷的骰：先掷完再继续行动，否则 KP 会基于未定的结果往下叙述
   if (hasPendingRoll()) {
@@ -1098,7 +1154,19 @@ async function sendAction() {
 
   const input = $('#input');
   const text = input.value.trim();
-  if (!text) return;
+  const client = state.net.role === 'client';
+  const retry = !client && state.keeperContinuation;
+  if (!retry && !text) return;
+
+  if (client) {
+    const room = state.net.room;
+    if (!room?.ready || room.busy || room.continuation || !claimedCharacter(state, state.net.myPlayerId)) return;
+    if (await sendRoomRequest('action', { text }) && input.value.trim() === text) {
+      input.value = '';
+      input.style.height = 'auto';
+    }
+    return;
+  }
 
   // 旁观模式没有玩家角色，玩家输入的是"旁白/指令"而不是角色行动
   if (!state.playerChar && state.mode !== 'spectator') {
@@ -1106,27 +1174,31 @@ async function sendAction() {
     return;
   }
 
-  input.value = '';
-  input.style.height = 'auto';
+  if (!retry) {
+    input.value = '';
+    input.style.height = 'auto';
+  }
 
+  await runPlayerTurn(text, { actorId: state.playerChar?.id });
+}
+
+async function runPlayerTurn(text, opts) {
+  const retry = state.keeperContinuation;
   busy = true;
-  const btn = $('#btnSend');
-  btn.disabled = true;
+  updateRollGate();
+  publishRoomState();
 
   try {
-    // 引擎内部处理「掷骰后自动续跑」，并带次数上限
-    const res = await engine.takeTurn(text);
-    // KP 连不上时不计轮数：否则「第 N 轮」会虚增，读档后轮数也对不上
-    if (res?.ok !== false) {
-      state.turns = (state.turns || 0) + 1;
-      await autoSave();
-    }
+    const res = await engine.takeTurn(text, opts);
+    if (res?.ok !== false && !retry) state.turns = (state.turns || 0) + 1;
+    if (res?.ok !== false || state.keeperContinuation) await autoSave();
   } catch (e) {
     console.error(e);
     engine.pushMessage({ role: 'system', text: `【错误】${e.message}` });
   } finally {
-    btn.disabled = false;
     busy = false;
+    updateRollGate();
+    publishRoomState();
     updateTokenMeter();
   }
 }
@@ -1144,7 +1216,8 @@ async function sendAction() {
  * 并发调用的话，每个队友看到的都是同一份旧局面，等于各说各话。
  */
 async function planTeammateActions() {
-  const acting = pickActingTeammates(state);
+  const teammates = state.teammates.filter((character) => !rollOwner(state, character));
+  const acting = pickActingTeammates({ ...state, teammates });
   if (!acting.length) return [];
 
   // 玩家这一轮刚说了什么：队友要能针对它做反应
@@ -1190,14 +1263,15 @@ async function planTeammateActions() {
 
 /** 队友 AI 主动插话 */
 async function teammateSpeak(opts = {}) {
-  if (busy && !opts.fromEngine) return;
+  if (state.net.role === 'client' || state.keeperContinuation || hasPendingRoll() || (busy && !opts.fromEngine)) return;
 
-  if (!state.teammates.length) {
+  const teammates = state.teammates.filter((character) => !rollOwner(state, character));
+  if (!teammates.length) {
     if (!opts.fromEngine) alert('还没有队友。点左侧「队友 +」添加一位。');
     return;
   }
 
-  const res = await generateTeammateLine(state, window.api);
+  const res = await generateTeammateLine({ ...state, teammates }, window.api);
   if (!res.ok) {
     // 自动插话失败时不打扰玩家，只在手动模式下提示
     if (!opts.fromEngine) {
@@ -1215,7 +1289,9 @@ async function teammateSpeak(opts = {}) {
 // 存档
 // ---------------------------------------------------------------------------
 async function autoSave() {
-  await window.api.writeSave('auto', buildSnapshot(state));
+  if (state.net.role === 'client') return;
+  const result = await window.api.writeSave('auto', buildSnapshot(state));
+  if (result?.ok === false) throw new Error(result.error || '自动存档写入失败');
 }
 
 // ---------------------------------------------------------------------------

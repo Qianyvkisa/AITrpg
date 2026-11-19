@@ -1,11 +1,13 @@
 ﻿# ---------------------------------------------------------------------------
-# 一键发布：测试 → 打包 exe → 提交 → 推送
+# 一键发布：测试 → 打包 exe → 校验 → 提交 → 推送 → 上传 GitHub Release
 #
 # 用法：
-#   .\release.ps1                     提交信息自动按改动生成
+#   .\release.ps1                     自动选择当前版本的下一个 fix 编号
 #   .\release.ps1 -Message "修复存档"   指定提交信息
+#   .\release.ps1 -Fix 1 -NotesFile .\release-notes.md  指定编号和 Markdown 正文
 #   .\release.ps1 -SkipTest           跳过测试（不推荐）
 #   .\release.ps1 -NoPush             只提交不推送
+#   .\release.ps1 -NoCommit           只测试+打包，不提交不推送（出完产物等人确认）
 #
 # 说明：
 #   - 打包用 NODE_OPTIONS=--use-system-ca 绕过本机代理证书导致的 TLS 校验失败
@@ -16,8 +18,11 @@
 [CmdletBinding()]
 param(
   [string]$Message,
+  [ValidateRange(0, 2147483647)] [int]$Fix,
+  [string]$NotesFile,
   [switch]$SkipTest,
-  [switch]$NoPush
+  [switch]$NoPush,
+  [switch]$NoCommit
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,11 +45,11 @@ function Die($text)       { Write-Host "  失败：$text" -ForegroundColor Red; 
 
 # ---- 0. 确认是 git 仓库且有远程 -------------------------------------------
 Step 0 '检查仓库'
-$remote = (& $git remote) 2>$null
-if (-not $remote) {
+$remote = (& $git remote get-url --push origin) 2>$null
+if ($LASTEXITCODE -ne 0 -or -not $remote) {
   Die "没有配置 remote。先执行：git remote add origin <仓库地址>"
 }
-Ok "remote: $(& $git remote get-url origin)"
+Ok '已找到 origin'
 
 # ---- 1. 跑测试 -------------------------------------------------------------
 if ($SkipTest) {
@@ -101,6 +106,28 @@ if ($Message -and ($Message -match 'v(\d+\.\d+\.\d+)')) {
 } else {
   Ok "当前版本：v$pkgVersion"
 }
+
+if (-not $NoCommit -and -not $NoPush) {
+  if ((& $git branch --show-current) -ne 'main') { Die '请在 main 分支发布' }
+  if ($remote -notmatch '^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([\w.-]+/[\w.-]+?)(?:\.git)?/?$') {
+    Die 'origin 必须是 GitHub 仓库地址'
+  }
+  $repository = $Matches[1]
+  if ($NotesFile) { $NotesFile = (Resolve-Path -LiteralPath $NotesFile).Path }
+
+  if (-not $Fix) {
+    $remoteTags = & $git ls-remote --tags --refs origin "refs/tags/v$pkgVersion-fix*"
+    if ($LASTEXITCODE -ne 0) { Die '无法查询 GitHub 上已使用的修复编号' }
+    $pattern = "refs/tags/v$([regex]::Escape($pkgVersion))-fix([1-9][0-9]*)\s*$"
+    $latest = 0
+    foreach ($line in $remoteTags) {
+      if ($line -match $pattern) { $latest = [Math]::Max($latest, [int]$Matches[1]) }
+    }
+    $Fix = $latest + 1
+  }
+  $tag = "v$pkgVersion-fix$Fix"
+  Ok "发布标签：$tag"
+}
 # ---- 2. 打包 exe -----------------------------------------------------------
 Step 2 '打包 exe'
 
@@ -118,6 +145,13 @@ if ($running) {
 }
 # 本机代理有中间人证书，不加这个会报 unable to verify the first certificate
 $env:NODE_OPTIONS = '--use-system-ca'
+
+# electron-builder 打包时要下载 electron 运行时 zip。
+# 直连 GitHub 在这台机器上会 ETIMEDOUT，必须走国内镜像。
+# 注意：.npmrc 里的 electron_mirror 只管 npm/pnpm 安装阶段，
+# electron-builder 读的是环境变量，两者互不相通，必须在这里单独设。
+$env:ELECTRON_MIRROR = 'https://npmmirror.com/mirrors/electron/'
+$env:ELECTRON_BUILDER_BINARIES_MIRROR = 'https://npmmirror.com/mirrors/electron-builder-binaries/'
 # 先应用自定义便携版启动器模板（跳过重复解压，让动画能立刻出现），再打包
 & $node tools\patch-portable-nsi.mjs
 if ($LASTEXITCODE -ne 0) { Die '应用便携版模板失败' }
@@ -139,6 +173,25 @@ if ($stray) {
 }
 Ok 'dist\ 顶层无 exe（仅保留 win-unpacked 供开发模式）'
 
+# ---- 2.4 asar 内容校验 -----------------------------------------------------
+# 打包成功不等于内容齐全：漏一个 themes.css 的表现是「exe 能开、界面全白」，
+# 而 electron-builder 自己不会为此报错（src/**/* 匹配不到也算成功）。
+# 这里按文件名点名核对，缺一个就停下。
+& $node tools\verify-asar.mjs
+if ($LASTEXITCODE -ne 0) { Die 'asar 内容校验失败' }
+Ok 'asar 内容校验通过'
+
+# ---- 2.5 只打包模式 --------------------------------------------------------
+# -NoCommit：产物已就位，停在这里等用户确认要不要发布。
+# 不碰 git，工作区保持原样（该脏就脏），用户想提交时自己跑 release.ps1 即可。
+if ($NoCommit) {
+  Write-Host ""
+  Write-Host "  已跳过提交与推送（-NoCommit）" -ForegroundColor Yellow
+  Write-Host "  产物：$exe" -ForegroundColor Green
+  Write-Host "  确认要发布时，去掉 -NoCommit 再跑一次即可。" -ForegroundColor Yellow
+  exit 0
+}
+
 # ---- 3. 提交 ---------------------------------------------------------------
 Step 3 '提交改动'
 $pending = (& $git status --porcelain) 2>$null
@@ -159,14 +212,38 @@ if (-not $pending) {
 
 # ---- 4. 推送 ---------------------------------------------------------------
 if ($NoPush) {
-  Write-Host '  跳过推送（-NoPush）' -ForegroundColor Yellow
+  Write-Host '  跳过推送与 Release 上传（-NoPush）' -ForegroundColor Yellow
   exit 0
 }
 
-Step 4 '推送到 GitHub'
-& $git push -u origin main
+Step 4 '推送源码和发布标签'
+$commit = & $git rev-parse HEAD
+if ($LASTEXITCODE -ne 0) { Die '无法取得本次发布的提交' }
+& $git push --atomic -u origin main "${commit}:refs/tags/$tag"
 if ($LASTEXITCODE -ne 0) { Die '推送失败（多半是没登录，见下方提示）' }
 Ok '推送完成'
+
+Step 5 '上传 GitHub Release'
+$releaseArgs = @('--repo', $repository, '--tag', $tag, '--commit', $commit)
+if ($NotesFile) {
+  $releaseArgs += @('--notes-file', $NotesFile)
+} else {
+  $title = & $git log -1 --format=%s HEAD
+  $releaseArgs += @('--message', $title)
+}
+
+$originalToken = $env:GH_TOKEN
+try {
+  if (-not $env:GH_TOKEN -and -not $env:GITHUB_TOKEN) {
+    $env:GH_TOKEN = (& (Join-Path $root 'tools\get-gh-token.ps1')).Trim()
+  }
+  & $node tools\publish-release.mjs @releaseArgs
+  if ($LASTEXITCODE -ne 0) { throw '上传或发布步骤失败' }
+} catch {
+  Die "GitHub Release $tag 未完成。修复问题后用 -Fix $Fix 重试。$($_.Exception.Message)"
+} finally {
+  $env:GH_TOKEN = $originalToken
+}
 
 Write-Host "`n全部完成。" -ForegroundColor Green
 exit 0

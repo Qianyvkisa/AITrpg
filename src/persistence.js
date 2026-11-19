@@ -2,6 +2,7 @@
 // 存档快照：状态 ↔ 存档 JSON 的双向转换
 // 只依赖 state 对象，不碰 DOM
 // ---------------------------------------------------------------------------
+import { restoreInvestigation } from './core/investigation.js';
 
 /**
  * 算「推进了几轮」。
@@ -31,6 +32,9 @@ export function buildSnapshot(state) {
       companions: state.companions || [],
       messages: state.messages,
       scenario: state.scenario,
+      rollBatch: state.rollBatch || null,
+      keeperContinuation: state.keeperContinuation || null,
+      turnActorId: state.turnActorId || '',
       module: state.module,
       mode: state.mode || 'player',
       turns: turnCount(state),
@@ -52,6 +56,12 @@ export function applySnapshot(state, snapshot) {
   state.companions = Array.isArray(s.companions) ? s.companions : [];
   state.messages = s.messages || [];
   state.scenario = s.scenario || state.scenario;
+  if (!Array.isArray(state.scenario.investigation)) {
+    state.scenario = { ...state.scenario, investigation: restoreInvestigation(state.messages, s.module?.scene) };
+  }
+  state.rollBatch = Array.isArray(s.rollBatch) ? s.rollBatch : null;
+  state.keeperContinuation = s.keeperContinuation || null;
+  state.turnActorId = s.turnActorId || '';
   state.module = s.module || null;
   state.mode = s.mode || 'player';
   state.turns = s.turns ?? (state.messages || []).filter((m) => m.role === 'user').length;

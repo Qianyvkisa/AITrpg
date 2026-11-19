@@ -162,14 +162,14 @@ class Client extends EventEmitter {
   }
 
   /** 主动断开，不再重连 */
-  close() {
+  close(reason = 'client closed') {
     this._manualClose = true;
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
     }
     if (this.ws) {
-      try { this.ws.close(1000, 'client closed'); } catch (e) {}
+      try { this.ws.close(1000, reason); } catch (e) {}
       this.ws = null;
     }
     this.connected = false;

@@ -50,11 +50,11 @@ async function teardownHost() {
 }
 
 /** 清掉客户端相关的一切 */
-function teardownClient() {
+function teardownClient(reason) {
   if (activeClient) {
     const c = activeClient;
     activeClient = null;
-    try { c.close(); } catch (e) { /* 已经断了 */ }
+    try { c.close(reason); } catch (e) { /* 已经断了 */ }
   }
 }
 
@@ -62,6 +62,10 @@ function registerNetIpc(getWindow) {
   const { ipcMain } = require('electron');
 
   const push = (channel) => (payload) => emitToRenderer(getWindow, channel, payload);
+  const pushPlayer = (channel) => ({ player, ...payload }) => push(channel)({
+    ...payload,
+    player: { id: player.id, name: player.name, charId: player.charId, online: !!player.ws }
+  });
 
   // -------------------------------------------------------------------------
   // 开房
@@ -77,14 +81,14 @@ function registerNetIpc(getWindow) {
       });
 
       // 网络事件 → 渲染层。这里只转发，不解释，游戏逻辑在渲染层。
-      host.on('player-joined', push('net:playerJoined'));
-      host.on('player-offline', push('net:playerOffline'));
-      host.on('player-reconnected', push('net:playerReconnected'));
-      host.on('claim', push('net:claim'));
-      host.on('action', push('net:action'));
-      host.on('roll', push('net:roll'));
-      host.on('chat', push('net:chat'));
-      host.on('ready', push('net:ready'));
+      host.on('player-joined', pushPlayer('net:playerJoined'));
+      host.on('player-offline', pushPlayer('net:playerOffline'));
+      host.on('player-reconnected', pushPlayer('net:playerReconnected'));
+      host.on('claim', pushPlayer('net:claim'));
+      host.on('action', pushPlayer('net:action'));
+      host.on('roll', pushPlayer('net:roll'));
+      host.on('chat', pushPlayer('net:chat'));
+      host.on('ready', pushPlayer('net:ready'));
 
       const info = await host.start();
       activeHost = host;
@@ -204,7 +208,7 @@ function registerNetIpc(getWindow) {
   });
 
   ipcMain.handle('net:leave', () => {
-    teardownClient();
+    teardownClient('left room');
     return { ok: true };
   });
 

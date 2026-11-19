@@ -25,13 +25,14 @@ const esc = (s) => String(s == null ? '' : s)
  * @param {(info: object) => void} [opts.onJoined] 加入成功回调
  * @param {() => void} [opts.onLeft] 离开房间回调
  */
-export function openOnline({ state, onHosted, onJoined, onLeft } = {}) {
+export function openOnline({ state, onHosted, onJoined, onLeft, onClaim } = {}) {
   const net = window.api?.net;
   if (!net) {
     alert('联机功能不可用（预加载脚本没有暴露 net）');
     return;
   }
 
+  let closed = false;
   const { backdrop, close } = openModal(`
     <div class="modal online-modal">
       <div class="modal-head">
@@ -42,11 +43,16 @@ export function openOnline({ state, onHosted, onJoined, onLeft } = {}) {
         <div class="online-loading">正在检查局域网…</div>
       </div>
     </div>
-  `);
+  `, { onClose: () => {
+    closed = true;
+    joinedInfo = null;
+    cleanup();
+  } });
 
   const body = backdrop.querySelector('#onlineBody');
   let unsubscribeRooms = null;
   let unsubscribers = [];
+  let joinedInfo = null;
 
   /** 面板关闭时一定要解绑，否则监听器会在每次开面板时累积 */
   const cleanup = () => {
@@ -73,13 +79,6 @@ export function openOnline({ state, onHosted, onJoined, onLeft } = {}) {
     );
   };
 
-  // 点遮罩或 × 关闭时也要清理
-  const origClose = close;
-  const closeAndCleanup = () => { cleanup(); origClose(); };
-  backdrop.querySelectorAll('[data-close]').forEach((b) => {
-    b.onclick = closeAndCleanup;
-  });
-
   // -------------------------------------------------------------------------
   // 主视图
   // -------------------------------------------------------------------------
@@ -89,6 +88,8 @@ export function openOnline({ state, onHosted, onJoined, onLeft } = {}) {
       net.clientStatus().catch(() => ({ ok: false }))
     ]);
 
+    if (closed) return;
+    joinedInfo = null;
     if (hostRes.ok) return renderHosting(hostRes);
     if (clientRes.ok) return renderJoined(clientRes);
     return renderChooser();
@@ -124,8 +125,7 @@ export function openOnline({ state, onHosted, onJoined, onLeft } = {}) {
         <div class="online-card">
           <h3>加入（我是玩家）</h3>
           <p class="online-hint">
-            同一个 WiFi 下会自动列出房间，点一下就连。
-            不在同一个网络时需要房主做端口转发。
+            同一个 WiFi 下会自动列出房间，点一下就连。也可手动填写房主的局域网地址。
           </p>
           <label class="online-field">
             <span>我的名字</span>
@@ -192,6 +192,7 @@ export function openOnline({ state, onHosted, onJoined, onLeft } = {}) {
 
     unsubscribeRooms = net.onRooms(paintRooms);
     const scan = await net.scanStart();
+    if (closed) return;
     paintRooms(scan.rooms || []);
 
     // 手动加入
@@ -254,6 +255,7 @@ export function openOnline({ state, onHosted, onJoined, onLeft } = {}) {
       </div>
       <p class="online-hint">
         朋友不用配 API Key——AI 和骰子都跑在你这台机器上。
+        开局时至少安排一位队友，朋友加入后可认领这位调查员。
       </p>
     `;
 
@@ -291,6 +293,18 @@ export function openOnline({ state, onHosted, onJoined, onLeft } = {}) {
   // 已加入
   // -------------------------------------------------------------------------
   function renderJoined(info) {
+    joinedInfo = info;
+    const room = state?.net?.room;
+    const connected = state?.net?.role === 'client' ? state.net.status === 'online' : info.connected;
+    const players = state?.net?.players || [];
+    const ownId = state?.net?.myPlayerId;
+    const choices = (room?.teammates || []).map((character) => {
+      const owner = players.find((player) => player.charId === character.id);
+      const label = owner?.id === ownId ? '当前角色' : owner ? `由 ${owner.name} 操控` : '认领';
+      return `<button class="btn ghost" data-claim="${esc(character.id)}" ${owner ? 'disabled' : ''}>
+        ${esc(character.name)} · ${esc(label)}
+      </button>`;
+    }).join('');
     body.innerHTML = `
       <div class="online-status">
         <div class="online-code-block">
@@ -303,13 +317,18 @@ export function openOnline({ state, onHosted, onJoined, onLeft } = {}) {
         </div>
       </div>
       <p class="online-hint">
-        ${info.connected ? '连接正常。' : '正在重连…'}
-        游戏由房主推进，你在这里只负责自己那位调查员。
+        ${connected ? '连接正常。' : '正在重连…'}
+        ${room?.ready ? '认领调查员后，在跑团界面发送行动和掷骰。' : '等待房主以调查员模式进入游戏。'}
       </p>
+      ${room?.ready ? `<div class="online-actions">${choices || '请让房主在开局时添加可供认领的队友。'}</div>` : ''}
       <div class="online-actions">
         <button class="btn danger" id="btnLeave">离开房间</button>
       </div>
     `;
+
+    body.querySelectorAll('[data-claim]').forEach((button) => {
+      button.onclick = () => onClaim?.(button.dataset.claim);
+    });
 
     body.querySelector('#btnLeave').onclick = async () => {
       await net.leave();
@@ -321,7 +340,8 @@ export function openOnline({ state, onHosted, onJoined, onLeft } = {}) {
   render();
 
   return {
-    close: closeAndCleanup,
-    refresh: render
+    close,
+    refresh: render,
+    refreshRoom: () => { if (joinedInfo) renderJoined(joinedInfo); }
   };
 }

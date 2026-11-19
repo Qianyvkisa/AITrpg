@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // 理智系统 —— COC 7e SAN 规则
 // ---------------------------------------------------------------------------
-import { rollDice, randInt } from './dice.js';
+import { maxDiceTotal, rollDice, randInt } from './dice.js';
 
 /** 常见的 SAN 损失组合 */
 export const SAN_LOSS_PRESETS = {
@@ -34,53 +34,37 @@ export function parseSanLoss(expr) {
 export function applySanCheck(ch, lossExpr, rollResult, level) {
   const { onSuccess, onFailure } = parseSanLoss(lossExpr);
 
-  // 大成功：不受损失
-  if (level.level === 'critical') {
-    return {
-      loss: 0,
-      note: '大成功，理智毫发无伤',
-      before: ch.san.current,
-      after: ch.san.current,
-      bout: false
-    };
-  }
-
   // 大失败：取最大损失
   if (level.level === 'fumble') {
-    const max = rollDice(onFailure);
-    const loss = max.total; // 已是掷出值
-    return finishSan(ch, loss, '大失败，理智损失取满额', true);
+    return finishSan(ch, Math.max(0, maxDiceTotal(onFailure)), '大失败，理智损失取满额');
   }
 
-  const ok = level.ok;
+  const ok = rollResult.value <= ch.san.current;
   const expr = ok ? onSuccess : onFailure;
   const rolled = rollDice(expr);
   const loss = Math.max(0, rolled.total);
 
-  return finishSan(ch, loss, ok ? '理智检定成功' : '理智检定失败', false);
+  return finishSan(ch, loss, ok ? '理智检定成功' : '理智检定失败');
 }
 
-function finishSan(ch, loss, note, forceBout) {
+function finishSan(ch, loss, note) {
   const before = ch.san.current;
   ch.san.current = Math.max(0, before - loss);
 
   // 单次损失 ≥5 点 → 临时疯狂（角色需要 INT 检定）
-  const tempMadness = loss >= 5 || forceBout;
+  const needsIntCheck = loss >= 5;
   // 累计损失达到当前 SAN 的 1/5 → 永久性疯狂（不定时疯狂）
   const ratio = before > 0 ? loss / before : 0;
   const indefinite = ratio >= 0.2;
-
-  const bout = tempMadness && loss > 0;
 
   return {
     loss,
     note,
     before,
     after: ch.san.current,
-    tempMadness,
     indefinite,
-    bout,
-    needsIntCheck: bout
+    bout: false,
+    needsIntCheck
   };
 }
 

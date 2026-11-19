@@ -114,22 +114,23 @@ export function describeCheck(c) {
 }
 
 /** 构造检定结果回喂给 AI 的文本 */
-export function formatCheckResult({ who, skill, difficulty, adjusted, roll, level }) {
+export function formatCheckResult({ who, skill, difficulty, adjusted, roll, level, passed = level.ok }) {
   const lines = [
     `【检定结果】${who} · ${skill}${difficulty !== '常规' ? `（${difficulty}）` : ''}`,
     `目标值 ${adjusted}，掷骰 ${roll.value}${roll.bonusPenaltyLabel ? ' ' + roll.bonusPenaltyLabel : ''} → ${level.label}`
   ];
+  if (!passed && level.ok) lines.push('※ 未达到要求的成功等级，本次检定未通过。');
   if (level.level === 'critical') lines.push('※ 大成功：应给予额外线索或超预期效果');
   if (level.level === 'fumble') lines.push('※ 大失败：应加入额外恶果');
   return lines.join('\n');
 }
 
 /** SAN 结果回喂 */
-export function formatSanResult({ who, loss, before, after, tempMadness, indefinite, bout }) {
+export function formatSanResult({ who, loss, before, after, indefinite, intRoll, boutTriggered }) {
   const lines = [
     `【理智检定】${who}：损失 ${loss} 点 SAN（${before} → ${after}）`
   ];
-  if (bout) lines.push('※ 单次损失≥5，触发临时疯狂，需要 INT 检定决定是否陷入疯狂发作');
+  if (intRoll) lines.push(`※ INT 掷骰 ${intRoll.value}，${boutTriggered ? '成功，触发临时疯狂' : '失败，维持理智'}`);
   if (indefinite) lines.push('※ 单次损失达当前 SAN 的 1/5，构成不定时疯狂');
   if (after <= 0) lines.push('※ SAN 归零：永久疯狂');
   else if (after <= 20) lines.push('※ SAN ≤20：濒临疯狂');

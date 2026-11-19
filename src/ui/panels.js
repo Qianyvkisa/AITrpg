@@ -202,8 +202,8 @@ export function renderRollLog(state) {
         const time = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
         const lvl = m.data?.level?.level;
         const cls = lvl === 'critical' ? 'crit' : lvl === 'fumble' ? 'fumb' : '';
-        const label = m.data?.level?.label || '';
-        const val = m.data?.roll?.value ?? m.data?.dmg ?? '';
+        const label = m.data?.passed === false && m.data?.level?.ok ? '未通过' : m.data?.level?.label || '';
+        const val = m.data?.roll?.value ?? m.data?.sanRoll?.value ?? m.data?.powRoll?.value ?? m.data?.dmg ?? '';
         const who = escapeHtml(m.data?.who || '');
         const what = escapeHtml(m.data?.skill || m.data?.kind || '');
         return `<div class="log-row ${cls}"><span class="t">${time}</span><span>${who} ${what} ${val} ${escapeHtml(label)}</span></div>`;

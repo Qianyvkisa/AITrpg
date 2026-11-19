@@ -175,7 +175,7 @@ export function renderMessage(msg, opts = {}) {
     const lvl = msg.data.level?.level;
     if (lvl === 'critical') wrap.classList.add('critical');
     else if (lvl === 'fumble') wrap.classList.add('fumble');
-    else if (msg.data.level?.ok) wrap.classList.add('success');
+    else if (msg.data.passed ?? msg.data.level?.ok) wrap.classList.add('success');
   }
 
   const roleEl = document.createElement('div');

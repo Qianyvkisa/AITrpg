@@ -114,7 +114,7 @@ class Host extends EventEmitter {
     ws.__remote = (req && req.socket && req.socket.remoteAddress) || '?';
 
     ws.on('message', (raw) => this._onMessage(ws, raw));
-    ws.on('close', () => this._onClose(ws));
+    ws.on('close', (code, reason) => this._onClose(ws, code, reason));
     ws.on('error', () => { /* close 会跟着来，这里吞掉避免未捕获异常 */ });
     ws.on('pong', () => { ws.__alive = true; });
 
@@ -150,7 +150,7 @@ class Host extends EventEmitter {
     }
 
     const player = this.players.get(ws.__playerId);
-    if (!player) return;
+    if (!player || player.ws !== ws) return;
 
     switch (msg.t) {
       case P.C2H.HELLO:
@@ -263,15 +263,19 @@ class Host extends EventEmitter {
     this.broadcastPlayers();
   }
 
-  _onClose(ws) {
+  _onClose(ws, code, reason) {
     if (!ws.__authed) return;
     const pid = ws.__playerId;
     const player = this.players.get(pid);
-    if (!player) return;
+    if (!player || player.ws !== ws) return;
 
     // 标记离线但保留 token，让他还能重连回来接原角色
     player.alive = false;
     player.ws = null;
+    if (code === 1000 && String(reason) === 'left room') {
+      this.players.delete(pid);
+      this.tokens.delete(player.token);
+    }
     this.emit('player-offline', { player });
     this.broadcastPlayers();
   }
@@ -361,6 +365,7 @@ class Host extends EventEmitter {
   setPlayerChar(playerId, charId) {
     const p = this.players.get(playerId);
     if (!p) return false;
+    if (charId && [...this.players.values()].some((other) => other !== p && other.charId === charId)) return false;
     p.charId = charId || null;
     this.broadcastPlayers();
     return true;

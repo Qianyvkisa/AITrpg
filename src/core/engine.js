@@ -11,6 +11,7 @@ import { keeperSystemPrompt } from './prompts.js';
 import { characterToPrompt } from './character.js';
 import { getHandler, summarizeResults, rollPending } from './directives.js';
 import { compactHistory, DEFAULT_HISTORY_BUDGET } from './contextBudget.js';
+import { rememberInvestigation, selectInvestigation, selectModuleText } from './investigation.js';
 
 /** 单轮最多自动续跑几次，防止 AI 反复请求检定导致无限循环 */
 const MAX_CHAIN = 3;
@@ -106,15 +107,23 @@ export class GameEngine {
   buildKeeperMessages() {
     const s = this.state;
     const playerChar = s.playerChar ? characterToPrompt(s.playerChar, { full: true }) : '';
-    const teammates = (s.teammates || []).map((t) => characterToPrompt(t, { full: true }));
+    const aiTeammates = (s.teammates || []).filter((t) => !this.rollOwner?.(t));
+    const teammates = aiTeammates.map((t) => characterToPrompt(t, { full: true }));
+    const guests = (s.teammates || []).filter((t) => !aiTeammates.includes(t));
+    const investigator = [s.playerChar, ...guests].find((ch) => ch?.id === s.turnActorId);
+    const lastAction = s.messages.findLast((m) => m.role === 'user' && !m.hidden);
+    const focus = [s.scenario.scene, lastAction?.text, ...(s.scenario.events || []).slice(-3)].join('\n');
     // 伙伴不在队里，只给精简档案：KP 需要知道「外面还有谁能赶来」，
     // 但不需要他们的完整技能表占满上下文
     const companions = (s.companions || []).map((c) => characterToPrompt(c, { full: false }));
 
     const sys = keeperSystemPrompt({
-      module: s.module?.raw || '',
+      module: selectModuleText(s.module?.raw, focus),
+      investigation: selectInvestigation(s.scenario, focus),
       scenario: s.scenario,
       playerChar,
+      guests: guests.map((t) => characterToPrompt({ ...t, isPlayer: true }, { full: true })),
+      actingInvestigator: investigator?.name,
       teammates,
       companions,
       tone: s.tone,
@@ -127,7 +136,7 @@ export class GameEngine {
 
     const recent = s.messages
       .filter((m) =>
-        m.role === 'user' || m.role === 'keeper' || m.role === 'system-result' ||
+        m.role === 'user' || (m.role === 'keeper' && !m.error) || m.role === 'system-result' ||
         // 队友自主行动也要进 KP 的上下文，否则 KP 不知道队友做了什么，
         // 会自己再编一套队友行动——那正是要消灭的「一人分饰多角」
         m.role === 'teammate-action'
@@ -165,9 +174,14 @@ export class GameEngine {
     // 线索和场景是模型推进剧情的依据，压掉就会开始编。
     // -------------------------------------------------------------------
     const sysMsg = messages.shift();
+    // 续跑的整批骰点要原样交还给守密人，即使历史需要压缩。
+    const feedbackId = s.keeperContinuation?.feedbackId;
+    const feedbackIndex = feedbackId ? messages.findIndex((m) => m._src?.id === feedbackId) : -1;
+    const feedback = feedbackIndex >= 0 ? messages.splice(feedbackIndex, 1)[0] : null;
     const { messages: compacted, stats } = compactHistory(messages, {
       budget: this.historyBudget
     });
+    if (feedback) compacted.push(feedback);
     this.lastCompactStats = stats;
 
     // 剥掉 _src：这是本地用的引用，不该发到上游（多传字段有些服务端会报错）
@@ -189,6 +203,7 @@ export class GameEngine {
    */
   async playerAction(text, opts = {}) {
     if (!text.trim()) return;
+    this.state.turnActorId = opts.actorId || '';
     this.pushMessage(opts.hidden ? { role: 'user', text, hidden: true } : { role: 'user', text });
     // 场景事件记录同理：自动推进不记成「玩家做了什么」，
     // 否则场景摘要里会堆满「玩家：继续推进剧情」这种无信息量的条目。
@@ -222,6 +237,8 @@ export class GameEngine {
         purpose: 'keeper',
         requestId: rid
       });
+    } catch (e) {
+      res = { ok: false, error: e?.message || String(e) };
     } finally {
       off();
       msg.streaming = false;
@@ -244,6 +261,7 @@ export class GameEngine {
     }
     // 成功了就把上一次的错误清掉，避免后续失败沿用到旧信息
     this.lastError = '';
+    s.keeperContinuation = null;
 
     // 累计 token 用量。上游在流末尾自报 usage（见 llm.js readStream），
     // 这是唯一能拿到真实消耗的途径——网关没有余额查询接口。
@@ -261,10 +279,14 @@ export class GameEngine {
     this.emit({ type: 'message-updated', message: msg });
 
     // 同一条消息里的指令只结算一次（防止重复扣血 / 扣 SAN）
+    const scene = s.scenario.scene;
+    const clueCount = s.scenario.clues.length;
     if (directives.length && !msg.resolved) {
       msg.resolved = true;
       await this.resolveDirectives(directives);
     }
+    const action = s.messages.findLast((message) => message.role === 'user' && !message.hidden)?.text;
+    rememberInvestigation(s.scenario, scene, msg, s.scenario.clues.slice(clueCount), action);
 
     return true;
   }
@@ -290,13 +312,18 @@ export class GameEngine {
     // 造成叙事和真实骰点对不上。等玩家掷完再由 rollAndResume 续跑。
     const pending = this.pendingRolls();
     if (pending.length) {
+      this.state.rollBatch = results.filter(Boolean).map((result) => result.status === 'pending'
+        ? { pendingId: result.id } : { result });
       this.state.awaitingRoll = true;
       this.emit({ type: 'state-changed' });
       this.emit({ type: 'roll-pending', pending });
       return;
     }
 
-    this.feedBackResults(results);
+    const feedback = this.feedBackResults(results);
+    if (!this.state.scenario.ended && results.some((r) => r?.status === 'rolled' || r?.kind === 'damage')) {
+      this.state.keeperContinuation = { feedbackId: feedback?.id };
+    }
     this.emit({ type: 'state-changed' });
   }
 
@@ -304,7 +331,7 @@ export class GameEngine {
   feedBackResults(results) {
     const summary = summarizeResults(results);
     if (summary) {
-      this.pushMessage({ role: 'system-result', text: summary, hidden: true });
+      return this.pushMessage({ role: 'system-result', text: summary, hidden: true });
     }
   }
 
@@ -320,22 +347,53 @@ export class GameEngine {
    * @param {string} pendingId 待掷骰的 id
    */
   async rollAndResume(pendingId) {
-    const target = this.pendingRolls().find((p) => p.id === pendingId);
+    const pending = this.pendingRolls();
+    const target = pending.find((p) => p.id === pendingId);
     if (!target) return null;
 
+    const s = this.state;
+    // 旧存档的待掷骰没有批次信息，仍可继续结算。
+    if (!s.rollBatch) {
+      const keeperIndex = s.messages.findLastIndex((message) => message.role === 'keeper');
+      const recentRolls = s.messages.slice(keeperIndex + 1)
+        .filter((message) => message.role === 'roll' && message.data && message.data.status !== 'pending');
+      s.rollBatch = [
+        ...recentRolls.map((message) => ({ result: message.data })),
+        ...pending.map((p) => ({ pendingId: p.id }))
+      ];
+    }
     const r = rollPending(this.context(), target);
+    if (!r) return null;
+    const entry = s.rollBatch.find((item) => item.pendingId === pendingId);
+    if (entry) entry.result = r;
+    else s.rollBatch.push({ result: r });
+
+    s.awaitingRoll = this.pendingRolls().length > 0;
+    if (!s.awaitingRoll) {
+      const feedback = this.feedBackResults(s.rollBatch.map((item) => item.result));
+      s.rollBatch = null;
+      s.keeperContinuation = s.scenario.ended ? null : { feedbackId: feedback?.id };
+    }
     this.emit({ type: 'state-changed' });
 
-    // 还有别的待掷骰就继续等，不要提前续跑
-    if (this.pendingRolls().length) return r;
-
-    this.state.awaitingRoll = false;
-    this.feedBackResults([r]);
-    this.emit({ type: 'state-changed' });
-
-    // 让 KP 接着叙述这次检定的后果
-    await this.runKeeper();
+    if (s.keeperContinuation) await this.resumeKeeper();
+    else await this.checkpoint?.();
     return r;
+  }
+
+  /** 先落盘结算，再续写。失败时保留续写标记供下次重试。 */
+  async resumeKeeper() {
+    let chain = 0;
+    while (this.state.keeperContinuation && !this.pendingRolls().length && chain < MAX_CHAIN) {
+      await this.checkpoint?.();
+      chain++;
+      if (!await this.runKeeper()) return { chain, ok: false, error: this.lastError };
+    }
+    if (this.state.keeperContinuation && !this.pendingRolls().length) {
+      await this.checkpoint?.();
+      return { chain, ok: false, error: '本轮检定次数较多，请手动继续叙事。' };
+    }
+    return { chain, ok: true, error: '' };
   }
 
   /** 给指令处理器用的上下文，避免它们直接依赖 engine 实例 */
@@ -343,6 +401,8 @@ export class GameEngine {
     return {
       state: this.state,
       findChar: (name) => this.findChar(name),
+      findCharById: (id) => this.findCharById(id),
+      rollOwner: this.rollOwner,
       pushMessage: (msg) => this.pushMessage(msg),
       updateMessage: (id, patch) => this.updateMessage(id, patch)
     };
@@ -351,8 +411,16 @@ export class GameEngine {
   findChar(name) {
     const s = this.state;
     if (!name) return s.playerChar;
+    const active = this.findCharById(s.turnActorId);
+    if (active?.name === name) return active;
     if (s.playerChar && s.playerChar.name === name) return s.playerChar;
     return (s.teammates || []).find((t) => t.name === name) || null;
+  }
+
+  findCharById(id) {
+    if (!id) return null;
+    if (this.state.playerChar?.id === id) return this.state.playerChar;
+    return (this.state.teammates || []).find((character) => character.id === id) || null;
   }
 
   /**
@@ -367,51 +435,15 @@ export class GameEngine {
    * 就叙述一个虚构的结果。玩家掷完骰后由 rollAndResume 接着跑。
    */
   async takeTurn(text, opts = {}) {
-    const before = this.state.messages.length;
-    // playerAction 会返回 runKeeper 的成败；KP 连不上时不必再往下续跑
+    if (this.state.keeperContinuation) return this.resumeKeeper();
+    if (this.pendingRolls().length) return { chain: 0, ok: false, error: '请先完成待掷骰。' };
     const firstOk = await this.playerAction(text, opts);
-
-    // 有玩家待掷骰：交给界面等玩家点按钮
-    if (this.pendingRolls().length) {
-      this.emit({ type: 'state-changed' });
-      return {
-        chain: 0,
-        ok: firstOk !== false,
-        error: firstOk === false ? (this.lastError || '') : ''
-      };
-    }
-
-    let chain = 0;
-    let ok = firstOk !== false;
-    while (chain < MAX_CHAIN) {
-      const newRolls = this.state.messages.slice(before).filter((m) => m.role === 'roll');
-      const pending = newRolls.filter((m) => !m.fedBack);
-      if (!pending.length) break;
-
-      for (const r of pending) r.fedBack = true;
-      chain++;
-      const stepOk = await this.runKeeper();
-      if (stepOk === false) { ok = false; break; }
-    }
-
-    // ---------------------------------------------------------------------
-    // 队友自主行动
-    //
-    // 放在 KP 叙述之后、队友补台词之前：先让队友对**刚发生的局面**做出
-    // 行动决策，再让 KP 裁定后果，最后才是可有可无的插话。
-    //
-    // 顺序不能反：若先插话再行动，队友会先评论一句、再回头去做事，
-    // 读起来像先表态后思考，很不自然。
-    // ---------------------------------------------------------------------
-    if (ok) {
-      const acted = await this.runTeammateActions();
-      if (acted) ok = true;   // 队友行动失败不影响本轮整体成败
-    }
-
-    // KP 说完之后，让队友自发接一句，避免整场只有 KP 在输出
-    if (ok) await this.autoTeammateChatter();
-
-    return { chain, ok, error: ok ? '' : (this.lastError || '') };
+    if (firstOk === false) return { chain: 0, ok: false, error: this.lastError };
+    const result = await this.resumeKeeper();
+    if (!result.ok || this.pendingRolls().length || this.state.scenario.ended) return result;
+    await this.runTeammateActions();
+    if (!this.pendingRolls().length && !this.state.keeperContinuation) await this.autoTeammateChatter();
+    return result;
   }
 
   /**
@@ -481,7 +513,8 @@ export class GameEngine {
 
     // 有队友行动过、且没在等骰，就让 KP 裁定这些行动的后果
     if (anyActed && !this.pendingRolls().length) {
-      await this.runKeeper();
+      if (!s.scenario.ended) s.keeperContinuation ??= {};
+      await this.resumeKeeper();
     }
 
     return anyActed;

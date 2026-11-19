@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 
 /** KP 系统提示词 */
-export function keeperSystemPrompt({ module, scenario, playerChar, teammates, companions, tone, mode, teammateAutonomous }) {
+export function keeperSystemPrompt({ module, scenario, investigation, playerChar, guests = [], actingInvestigator, teammates, companions, tone, mode, teammateAutonomous }) {
   const toneMap = {
     '经典恐怖': '阴森、压抑、克苏鲁式的宇宙恐惧。不要写血腥猎奇，要写"不该存在的合理感"。',
     '调查悬疑': '偏推理、线索导向，恐怖感克制，让玩家靠逻辑推进。',
@@ -89,7 +89,7 @@ ${toneMap[tone] || toneMap['经典恐怖']}
 以下内容是你的秘密底牌。你要按它推进，但绝不要直接念给玩家听，要拆成线索、场景、NPC 行为一点点透露。
 
 ---
-${module.slice(0, 12000)}
+${module}
 ---`);
   } else {
     parts.push(`
@@ -111,6 +111,17 @@ ${module.slice(0, 12000)}
 未揭示的伏笔：${(scenario.secrets || []).join('；') || '无'}
 ${scenario.notes ? '备注：' + scenario.notes : ''}`);
   }
+
+  if (investigation) parts.push(`
+# 相关调查记录
+下面是先前场景、线索和对话的摘录。保留已确认的事实和未兑现的约定，区分 NPC 的陈述与已验证的事实。
+${investigation}`);
+
+  if (guests.length) parts.push(`
+# 联机调查员
+以下角色由其他玩家亲自操控。保留他们的行动权；要求检定时写明该调查员的角色名，等待系统给出结果。
+${guests.join('\n\n')}
+${actingInvestigator ? `本轮采取行动的调查员：${actingInvestigator}` : ''}`);
 
   if (playerChar) {
     parts.push(`

@@ -349,44 +349,19 @@ Module._load = function (request, ...args) {
 ### 一键发布（推荐）
 
 ```powershell
-.\release.ps1                      # 提交信息自动按改动生成
+.\release.ps1                      # 选择下一个 fix 编号，打包、推送并上传
 .\release.ps1 -Message "修复存档"
+.\release.ps1 -Fix 2 -NotesFile .\release-notes.md
 .\release.ps1 -SkipTest            # 跳过测试（不推荐）
 .\release.ps1 -NoPush              # 只提交不推送
+.\release.ps1 -NoCommit            # 测试、打包和核对产物
 ```
 
-脚本会依次：跑测试 → 校验版本一致性 → patch NSIS → 打包 → 移动产物 → 提交 → 推送。任何一步失败立即停。
+脚本依次跑测试、打包并核对便携 EXE、提交工作区、推送 `main` 和修复标签、上传附件并公开 Release。
+标签沿用 `package.json` 的基础版本并递增修订号，例如 `v0.4.1-fix1`。上传附件命名为 `COC-v0.4.1-fix1.exe`。
+正文默认使用提交标题，也可用 `-NotesFile` 传入 UTF-8 Markdown 文件。上传失败后，可用原 `-Fix` 编号重试同一提交。
 
-### 手工发布步骤
-
-```powershell
-# 0. 全局设置（本机代理证书问题，见下面「三个坑」）
-$env:NODE_OPTIONS = '--use-system-ca'
-$node = 'C:\Users\junyu\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe'
-
-# 1. 改版本号（package.json 的 version）
-# 2. 编辑 tools/make-release-body.mjs 里的发布说明文案，然后生成正文
-& $node tools\make-release-body.mjs
-#    → 输出 tools\ui\shots\release-body.json（该目录被 gitignore，不入库）
-
-# 3. 打 NSIS 补丁（覆盖 electron-builder 的 portable 模板）
-& $node tools\patch-portable-nsi.mjs
-
-# 4. 打包
-& $node node_modules\electron-builder\out\cli\cli.js --win portable
-
-# 5. 移动产物到根目录（需要先关掉正在运行的 exe）
-& $node tools\move-artifact.mjs
-
-# 6. 提交并推送代码
-git add -A; git commit -m "..."; git push origin HEAD
-
-# 7. 创建 Release 并上传（需要 GH_TOKEN）
-$env:GH_TOKEN = (& powershell -NoProfile -ExecutionPolicy Bypass -File tools\get-gh-token.ps1).Trim()
-& $node tools\publish-release.mjs
-```
-
-> 注意第 2 步的产物路径：`tools/ui/shots/` 整个目录在 `.gitignore` 里（只保留脚本、不保留产物）。这意味着**发布正文不会被提交**，每次发布前都要重新生成——这是有意的，避免仓库里堆历史发布稿。
+上传使用 `GH_TOKEN` 或 `GITHUB_TOKEN`。两者都为空时，脚本使用本机已配置的 GitHub 凭据。
 
 ### 本机环境的三个坑
 
@@ -466,7 +441,7 @@ node tools/verify-cache-stamp.mjs  # 指纹是否随源码变化
 ## 12. 提交前检查清单
 
 - [ ] `npm test` 全绿（16 个文件）
-- [ ] 改版本号时，`package.json`、`make-release-body.mjs`、提交信息三处一致（`release.ps1` 会交叉校验）
+- [ ] 提交信息含基础版本号时，与 `package.json` 保持一致
 - [ ] 新加的 `state` 字段在 `applySnapshot()` 里有兜底
 - [ ] 新加的指令类型三处都改了（protocol / directives / prompts）
 - [ ] 错误提示用 `res.friendly`，不要把 `res.error` 直接甩给玩家

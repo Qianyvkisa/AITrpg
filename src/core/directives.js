@@ -121,6 +121,7 @@ export function resolveSkillValue(ch, rawName) {
 /** 该角色是否由玩家亲自操控 */
 function isPlayerChar(ctx, ch) {
   if (!ch) return false;
+  if (ctx.rollOwner?.(ch)) return true;
   if (ch.isPlayer) return true;
   // 兜底：玩家角色对象与 state.playerChar 是同一个
   return ch === ctx.state.playerChar;
@@ -130,14 +131,14 @@ function isPlayerChar(ctx, ch) {
  * 把一个检定登记为「等待玩家掷骰」。
  * @returns {object} 与原来 CHECK 返回值同形的占位结果
  */
-function deferCheck(ctx, { who, skillName, difficulty, base, adjusted, bonus, penalty, reason }) {
+function deferCheck(ctx, { who, charId, skillName, difficulty, base, adjusted, bonus, penalty, reason, ownerId }) {
   const pending = {
     id: 'roll-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
     kind: 'check',
-    who, skill: skillName, difficulty,
+    who, charId, skill: skillName, difficulty,
     baseSkill: base ?? 5, adjusted,
     bonus, penalty, reason,
-    status: 'pending'
+    status: 'pending', ownerId
   };
 
   const msg = ctx.pushMessage({
@@ -158,20 +159,21 @@ function deferCheck(ctx, { who, skillName, difficulty, base, adjusted, bonus, pe
 export function rollPending(ctx, pending) {
   if (!pending || pending.status !== 'pending') return null;
 
-  const ch = ctx.findChar(pending.who);
+  const ch = ctx.findCharById?.(pending.charId) || ctx.findChar(pending.who);
   if (!ch) return null;
 
   pending.status = 'rolled';
 
   if (pending.kind === 'check') {
     const roll = rollD100({ bonus: pending.bonus, penalty: pending.penalty });
-    const level = successLevel(roll.value, pending.adjusted);
+    const level = successLevel(roll.value, pending.baseSkill, pending.adjusted);
+    const passed = level.ok && (level.level === 'critical' || roll.value <= pending.adjusted);
 
     const r = {
       kind: 'check',
-      who: pending.who, skill: pending.skill, difficulty: pending.difficulty,
+      who: pending.who, charId: pending.charId, skill: pending.skill, difficulty: pending.difficulty,
       baseSkill: pending.baseSkill, adjusted: pending.adjusted,
-      roll, level, reason: pending.reason,
+      roll, level, passed, reason: pending.reason,
       // 结果对象自带 status，回填到消息后界面据此判断不再显示「掷骰」按钮
       status: 'rolled'
     };
@@ -182,29 +184,25 @@ export function rollPending(ctx, pending) {
       ctx.updateMessage(pending.messageId, { text: formatCheckResult(r), data: r, pending: false });
     }
     ctx.state.scenario.events.push(
-      `${pending.who} ${pending.skill}检定 → ${level.label}（${roll.value}/${pending.adjusted}）`
+      `${pending.who} ${pending.skill}检定 → ${passed ? level.label : '未通过'}（${roll.value}/${pending.adjusted}）`
     );
     return r;
   }
 
   if (pending.kind === 'san') {
     const roll = rollD100({});
-    const level = successLevel(roll.value, ch.attrs.POW);
+    const level = successLevel(roll.value, ch.san.current);
     const sanResult = applySanCheck(ch, pending.lossExpr, roll, level);
 
     const r = {
       kind: 'san',
-      who: pending.who, reason: pending.reason, lossExpr: pending.lossExpr,
-      powRoll: roll, powLevel: level,
+      who: pending.who, charId: pending.charId, reason: pending.reason, lossExpr: pending.lossExpr,
+      sanRoll: roll, sanLevel: level,
       status: 'rolled',
       ...sanResult
     };
     pending.result = r;
 
-    // 自动掷骰（队友/NPC）没有占位消息，此时 messageId 为空，跳过回填
-    if (pending.messageId) {
-      ctx.updateMessage(pending.messageId, { text: formatSanResult(r), data: r, pending: false });
-    }
     ctx.state.scenario.events.push(
       `${pending.who} 理智检定：损失 ${sanResult.loss} 点（${sanResult.before}→${sanResult.after}）`
     );
@@ -215,28 +213,33 @@ export function rollPending(ctx, pending) {
       ctx.pushMessage({ role: 'system', text: `【状态】${pending.who}：${ins.note}` });
     }
 
-    // 临时疯狂 → 需要 INT 检定（7e：INT 检定失败 → 陷入疯狂发作）
-    if (sanResult.needsIntCheck) {
+    // INT 检定成功意味着调查员理解了看到的恐怖，因而陷入临时疯狂。
+    if (sanResult.needsIntCheck && !ins.insane) {
       const intRoll = rollD100({});
       const intLevel = successLevel(intRoll.value, ch.attrs.INT);
-      const bout = !intLevel.ok;
+      const bout = intLevel.ok;
 
       r.intRoll = intRoll;
       r.intLevel = intLevel;
       r.boutTriggered = bout;
+      r.bout = bout;
+      r.tempMadness = bout;
 
       if (bout) {
         if (!ch.status.includes('临时疯狂')) ch.status.push('临时疯狂');
         ctx.pushMessage({
           role: 'system',
-          text: `【疯狂发作】${pending.who} 的理智遭到冲击，INT 检定失败（${intRoll.value}/${ch.attrs.INT}），陷入疯狂发作。`
+          text: `【疯狂发作】${pending.who} 的 INT 检定成功（${intRoll.value}/${ch.attrs.INT}），因理解眼前的恐怖而陷入临时疯狂。`
         });
       } else {
         ctx.pushMessage({
           role: 'system',
-          text: `【强撑】${pending.who} 勉强维持住了自我（INT 检定成功 ${intRoll.value}/${ch.attrs.INT}），但精神已受重创。`
+          text: `【强撑】${pending.who} 的 INT 检定失败（${intRoll.value}/${ch.attrs.INT}），暂时维持住了自我。`
         });
       }
+    }
+    if (pending.messageId) {
+      ctx.updateMessage(pending.messageId, { text: formatSanResult(r), data: r, pending: false });
     }
     return r;
   }
@@ -261,6 +264,9 @@ function pickActor(ctx, d) {
   if (explicit) {
     return { who: explicit, ch: ctx.findChar(explicit) };
   }
+
+  const active = (ctx.state.teammates || []).find((ch) => ch.id === ctx.state.turnActorId);
+  if (active) return { who: active.name, ch: active };
 
   const player = ctx.state.playerChar;
   if (player) return { who: player.name, ch: player };
@@ -295,7 +301,7 @@ define('CHECK', (ctx, d) => {
   const penalty = Number(d.opts['惩罚'] || 0);
   const reason = d.opts['原因'] || '';
 
-  const params = { who, skillName, difficulty, base, adjusted, bonus, penalty, reason };
+  const params = { who, charId: ch.id, skillName, difficulty, base, adjusted, bonus, penalty, reason, ownerId: ctx.rollOwner?.(ch) };
 
   // 缺技能提示：无论手动还是自动都要告诉玩家
   if (base === undefined) {
@@ -311,7 +317,7 @@ define('CHECK', (ctx, d) => {
   }
 
   // 队友 / NPC → 自动掷（走统一的结算函数）
-  const autoPending = { kind: 'check', who, skill: skillName, difficulty, baseSkill: skillValue, adjusted, bonus, penalty, reason, status: 'pending' };
+  const autoPending = { kind: 'check', who, charId: ch.id, skill: skillName, difficulty, baseSkill: skillValue, adjusted, bonus, penalty, reason, status: 'pending' };
   const r = rollPending(ctx, autoPending);
   if (r) {
     ctx.pushMessage({ role: 'roll', text: formatCheckResult(r), data: r });
@@ -343,8 +349,8 @@ define('SAN', (ctx, d) => {
     const pending = {
       id: 'roll-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
       kind: 'san',
-      who, lossExpr, reason,
-      status: 'pending'
+      who, charId: ch.id, lossExpr, reason,
+      status: 'pending', ownerId: ctx.rollOwner?.(ch)
     };
     const msg = ctx.pushMessage({
       role: 'roll',
@@ -356,7 +362,7 @@ define('SAN', (ctx, d) => {
   }
 
   // 队友 / NPC → 自动掷（交给统一的结算函数）
-  const pending = { kind: 'san', who, lossExpr, reason, status: 'pending' };
+  const pending = { kind: 'san', who, charId: ch.id, lossExpr, reason, status: 'pending' };
   const r = rollPending(ctx, pending);
 
   // 自动掷骰时没有对应的占位消息，这里补发结果消息
@@ -494,6 +500,9 @@ export function summarizeResults(results) {
       if (r.kind === 'check') return formatCheckResult(r);
       if (r.kind === 'san') return formatSanResult(r);
       if (r.kind === 'damage') return `【伤害】${r.who} 受到 ${r.dmg} 点伤害 → HP ${r.hpAfter}/${r.hpMax}`;
+      if (r.kind === 'clue' && r.clue) return `【线索】${r.clue}`;
+      if (r.kind === 'scene') return `【场景】${r.scene}`;
+      if (r.kind === 'end') return `【模组结束】${r.ending}`;
       return r.text || '';
     })
     .filter(Boolean);

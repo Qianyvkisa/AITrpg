@@ -16,6 +16,15 @@ const TERM_RE = /([+-])?(\d+d\d+|\d+|d\d+)/gi;
  * 返回 { total, rolls, mod, expr }；无法解析时 total 为 0。
  */
 export function rollDice(expr) {
+  return evaluateDice(expr, (sides) => randInt(1, sides), true);
+}
+
+/** 最大可能结果。减去一组骰子时，取那组骰子的最小值。 */
+export function maxDiceTotal(expr) {
+  return evaluateDice(expr, (sides, sign) => sign > 0 ? sides : 1, false).total;
+}
+
+function evaluateDice(expr, pick, collectRolls) {
   const src = String(expr).replace(/\s/g, '');
   const terms = [...src.matchAll(TERM_RE)];
 
@@ -38,10 +47,14 @@ export function rollDice(expr) {
     if (dice) {
       const count = dice[1] ? parseInt(dice[1], 10) : 1;
       const sides = parseInt(dice[2], 10);
-      for (let i = 0; i < count; i++) {
-        const v = randInt(1, sides) * sign;
-        rolls.push(v);
-        total += v;
+      if (collectRolls) {
+        for (let i = 0; i < count; i++) {
+          const v = pick(sides, sign) * sign;
+          rolls.push(v);
+          total += v;
+        }
+      } else {
+        total += count * pick(sides, sign) * sign;
       }
     } else {
       const v = parseInt(body, 10) * sign;
@@ -116,10 +129,10 @@ export function rollD100({ bonus = 0, penalty = 0 } = {}) {
  * ≤ 技能/5    → 极难成功 extreme
  * ≤ 技能/2    → 困难成功 hard
  * ≤ 技能      → 常规成功 regular
- * 96-100（技能<50 时仅 100）→ 大失败 fumble
+ * 96-100（任务目标值 ≥50 时仅 100）→ 大失败 fumble
  * 其余        → 失败 failure
  */
-export function successLevel(roll, skillValue) {
+export function successLevel(roll, skillValue, target = skillValue) {
   const skill = Math.max(0, Math.min(100, Math.floor(skillValue)));
 
   // 大成功：骰出 01
@@ -133,8 +146,7 @@ export function successLevel(roll, skillValue) {
     };
   }
 
-  // 大失败：技能 <50 时只有 100；技能 ≥50 时 96-100
-  const fumbleMin = skill < 50 ? 100 : 96;
+  const fumbleMin = target < 50 ? 96 : 100;
   if (roll >= fumbleMin) {
     return {
       level: 'fumble',

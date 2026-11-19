@@ -99,12 +99,12 @@ group('successLevel 成功等级判定', () => {
   eq(successLevel(51, 50).rank, 0, '失败 rank=0');
   ok(!successLevel(51, 50).ok, '失败标记不成功');
 
-  eq(successLevel(96, 50).level, 'fumble', '技能≥50 时 96 是大失败');
+  eq(successLevel(96, 50).level, 'failure', '目标值≥50 时 96 是普通失败');
   eq(successLevel(100, 50).level, 'fumble', '技能≥50 时 100 是大失败');
-  eq(successLevel(96, 50).rank, -1, '大失败 rank=-1');
+  eq(successLevel(96, 50, 25).rank, -1, '目标值<50 时 96 是大失败');
 
-  eq(successLevel(96, 40).level, 'failure', '技能<50 时 96 只是失败');
-  eq(successLevel(100, 40).level, 'fumble', '技能<50 时 100 才是大失败');
+  eq(successLevel(95, 40).level, 'failure', '目标值<50 时 95 仍是普通失败');
+  eq(successLevel(96, 40).level, 'fumble', '目标值<50 时 96–100 均为大失败');
 
   eq(successLevel(1, 0).level, 'critical', '技能 0 掷出 1 仍是大成功');
   eq(successLevel(50, 0).level, 'failure', '技能 0 掷 50 失败');
@@ -271,8 +271,8 @@ group('applySanCheck 理智检定', () => {
 
   const ch2 = createCharacter();
   const r2 = applySanCheck(ch2, '1/1d6', { value: 1 }, successLevel(1, 50));
-  eq(r2.loss, 0, '大成功不损失 SAN');
-  eq(r2.after, r2.before, '大成功后 SAN 不变');
+  eq(r2.loss, 1, '掷出 01 仍按成功侧表达式扣减 SAN');
+  eq(r2.after, r2.before - 1, '成功侧损失写入角色卡');
 
   const ch3 = createCharacter();
   const r3 = applySanCheck(ch3, '0/1d3', { value: 80 }, successLevel(80, 50));

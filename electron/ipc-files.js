@@ -14,28 +14,34 @@ const { loadConfig } = require('./config');
 
 const SAVE_PREFIX = 'save-';
 
+function readSaveFile(name) {
+  return readJSON(name, null) ?? readJSON(`${name}.bak`, null);
+}
+
 function registerSaveIpc() {
   ipcMain.handle('save:list', () => {
-    const files = listFiles((f) => f.startsWith(SAVE_PREFIX) && f.endsWith('.json'));
-    return files
-      .map(({ name, path: p, stat }) => {
-        let meta = {};
-        try { meta = JSON.parse(fs.readFileSync(p, 'utf8')).meta ?? {}; } catch (_) { /* 坏档跳过 meta */ }
-        return { file: name, mtime: stat.mtimeMs, ...meta };
-      })
+    const files = listFiles((f) => f.startsWith(SAVE_PREFIX) && /\.json(?:\.bak)?$/.test(f));
+    const slots = new Map();
+    for (const { name, stat } of files) {
+      const file = name.replace(/\.bak$/, '');
+      slots.set(file, Math.max(slots.get(file) || 0, stat.mtimeMs));
+    }
+    return [...slots]
+      .map(([file, mtime]) => ({ file, mtime, ...readSaveFile(file)?.meta }))
       .sort((a, b) => b.mtime - a.mtime);
   });
 
   ipcMain.handle('save:write', (_e, { slot, state }) => {
     const name = `${SAVE_PREFIX}${slot}.json`;
-    writeJSON(name, state);
+    writeJSON(name, state, { backup: true });
     return { ok: true, file: name };
   });
 
-  ipcMain.handle('save:read', (_e, slot) => readJSON(`${SAVE_PREFIX}${slot}.json`, null));
+  ipcMain.handle('save:read', (_e, slot) => readSaveFile(`${SAVE_PREFIX}${slot}.json`));
 
   ipcMain.handle('save:delete', (_e, slot) => {
     deleteFile(`${SAVE_PREFIX}${slot}.json`);
+    deleteFile(`${SAVE_PREFIX}${slot}.json.bak`);
     return { ok: true };
   });
 }
@@ -305,13 +311,17 @@ function registerCharIpc() {
 // 这里的路径也要指向 app.asar.unpacked。
 // ---------------------------------------------------------------------------
 function ruleBookPath() {
+  const portableDir = process.env.PORTABLE_EXECUTABLE_DIR;
+  const external = portableDir && path.join(portableDir, 'assets', 'coc-kp.pdf');
+  if (external && fs.existsSync(external)) return external;
+
   const packed = path.join(__dirname, '..', 'assets', 'coc-kp.pdf');
   // 打包后 __dirname 形如 .../resources/app.asar/electron，
   // 同名文件在 app.asar.unpacked 下才是真实文件，优先用它
   const unpacked = packed.replace(`${path.sep}app.asar${path.sep}`,
     `${path.sep}app.asar.unpacked${path.sep}`);
   if (unpacked !== packed && fs.existsSync(unpacked)) return unpacked;
-  return packed;
+  return external || packed;
 }
 
 function registerRuleBookIpc() {

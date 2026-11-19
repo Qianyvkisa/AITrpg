@@ -60,7 +60,7 @@ for (const ch of invoked) {
 
 // 订阅通道：主进程 send 的 vs preload on 监听的
 const pushed = new Set();
-for (const m of netIpcJs.matchAll(/push\('([^']+)'\)/g)) pushed.add(m[1]);
+for (const m of netIpcJs.matchAll(/push(?:Player)?\('([^']+)'\)/g)) pushed.add(m[1]);
 const listened = new Set();
 for (const m of preloadJs.matchAll(/sub\('([^']+)'\)/g)) listened.add(m[1]);
 console.log(`     主进程推送: ${[...pushed].join(', ')}`);
@@ -97,7 +97,7 @@ console.log('\n== applySnapshot 签名 ==');
 
 console.log('\n== 消息 role 白名单 ==');
 const usedRoles = new Set();
-for (const m of appJs.matchAll(/role: '(\w+)'/g)) usedRoles.add(m[1]);
+for (const m of appJs.matchAll(/pushMessage\(\{[^}]*?\brole:\s*'([\w-]+)'/g)) usedRoles.add(m[1]);
 // 渲染器支持的 role：直接从 messages.js 的 ROLE 映射表里读，
 // 别在测试里手写一份——手写的那份迟早会和实现不同步。
 const roleTable = messagesJs.match(/const\s+ROLE\w*\s*=\s*\{([\s\S]*?)\};/);

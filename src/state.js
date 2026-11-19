@@ -15,12 +15,16 @@ export function createInitialState() {
       scene: '',
       events: [],
       clues: [],
+      investigation: [],
       secrets: [],
       notes: '',
       ended: false,
       ending: ''
     },
     module: null,
+    rollBatch: null,
+    keeperContinuation: null,
+    turnActorId: '',
     // 参与方式：'player' 扮演调查员 / 'spectator' 旁观
     mode: 'player',
     // 已推进的轮数（旁观模式下没有玩家消息，靠它判断「有没有进度」）

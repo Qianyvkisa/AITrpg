@@ -60,6 +60,7 @@ function describeRoll(m) {
   if (target !== null) parts.push(`目标 ${target}`);
   if (value !== null) parts.push(`掷出 ${value}${bonusPenalty}`);
   if (level) parts.push(`→ ${level}`);
+  if (d.passed === false && d.level?.ok) parts.push('未通过');
   return parts.join('，') + special;
 }
 
