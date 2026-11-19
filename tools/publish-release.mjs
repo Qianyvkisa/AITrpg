@@ -6,6 +6,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs, promisify } from 'node:util';
 
+const UPLOAD_TIMEOUT_SECONDS = 900;
+
 export async function publishRelease({ repo, tag, commit, notes, assetName, data, token }, fetcher = fetch, sendAsset) {
   const url = `https://api.github.com/repos/${repo}/releases`;
   const headers = {
@@ -16,12 +18,12 @@ export async function publishRelease({ repo, tag, commit, notes, assetName, data
   };
   const digest = `sha256:${createHash('sha256').update(data).digest('hex')}`;
 
-  async function request(endpoint, method = 'GET', options = {}) {
+  async function request(endpoint, method = 'GET', options = {}, timeoutSeconds = 30) {
     const response = await fetcher(endpoint, {
       ...options,
       method,
       headers: { ...headers, ...options.headers },
-      signal: AbortSignal.timeout(300_000)
+      signal: AbortSignal.timeout(timeoutSeconds * 1000)
     });
     if (!response.ok) {
       throw new Error(`${method} ${new URL(endpoint).pathname} 失败（HTTP ${response.status}）：${await response.text()}`);
@@ -66,7 +68,7 @@ export async function publishRelease({ repo, tag, commit, notes, assetName, data
       : await request(upload, 'POST', {
         headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(data.length) },
         body: data
-      });
+      }, UPLOAD_TIMEOUT_SECONDS);
     if (asset.state !== 'uploaded' || asset.size !== data.length || (asset.digest && asset.digest !== digest)) {
       throw new Error('GitHub 返回的附件信息与本地 EXE 不一致。');
     }
@@ -94,14 +96,14 @@ async function uploadWithPowerShell(shell, url, exePath) {
       Headers = $headers
       ContentType = 'application/octet-stream'
       InFile = $env:COC_RELEASE_UPLOAD_FILE
-      TimeoutSec = 300
+      TimeoutSec = ${UPLOAD_TIMEOUT_SECONDS}
     }
     $asset = Invoke-RestMethod @arguments
     $asset | ConvertTo-Json -Depth 6 -Compress
   `;
   const { stdout } = await promisify(execFile)(shell, ['-NoProfile', '-NonInteractive', '-Command', command], {
     windowsHide: true,
-    timeout: 320_000,
+    timeout: (UPLOAD_TIMEOUT_SECONDS + 20) * 1000,
     env: { ...process.env, COC_RELEASE_UPLOAD_URL: url.href, COC_RELEASE_UPLOAD_FILE: exePath }
   });
   return JSON.parse(stdout.trim());
