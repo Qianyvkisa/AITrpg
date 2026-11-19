@@ -1,11 +1,12 @@
 // 由 release.ps1 推送精确的 Git 标签后调用。先上传草稿附件，再公开发布。
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { parseArgs } from 'node:util';
+import { parseArgs, promisify } from 'node:util';
 
-export async function publishRelease({ repo, tag, commit, notes, assetName, data, token }, fetcher = fetch) {
+export async function publishRelease({ repo, tag, commit, notes, assetName, data, token }, fetcher = fetch, sendAsset) {
   const url = `https://api.github.com/repos/${repo}/releases`;
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -60,17 +61,50 @@ export async function publishRelease({ repo, tag, commit, notes, assetName, data
     const upload = new URL(release.upload_url.split('{')[0]);
     if (upload.origin !== 'https://uploads.github.com') throw new Error('GitHub 返回了无效的附件上传地址。');
     upload.searchParams.set('name', assetName);
-    asset = await request(upload, 'POST', {
-      headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(data.length) },
-      body: data
-    });
+    asset = sendAsset
+      ? await sendAsset(upload)
+      : await request(upload, 'POST', {
+        headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(data.length) },
+        body: data
+      });
     if (asset.state !== 'uploaded' || asset.size !== data.length || (asset.digest && asset.digest !== digest)) {
       throw new Error('GitHub 返回的附件信息与本地 EXE 不一致。');
     }
   }
 
   release = await request(`${url}/${release.id}`, 'PATCH', json({ draft: false }));
-  return { release, asset };
+  return { release, asset: release.assets?.find((item) => item.id === asset.id) || asset };
+}
+
+async function uploadWithPowerShell(shell, url, exePath) {
+  // 用 Windows 的 HTTP 客户端从文件流传输大附件，沿用系统代理与证书配置。
+  const command = `
+    $ErrorActionPreference = 'Stop'
+    $ProgressPreference = 'SilentlyContinue'
+    [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+    $token = if ($env:GH_TOKEN) { $env:GH_TOKEN } else { $env:GITHUB_TOKEN }
+    $headers = @{
+      Authorization = "Bearer $token"
+      Accept = 'application/vnd.github+json'
+      'X-GitHub-Api-Version' = '2022-11-28'
+    }
+    $arguments = @{
+      Method = 'Post'
+      Uri = $env:COC_RELEASE_UPLOAD_URL
+      Headers = $headers
+      ContentType = 'application/octet-stream'
+      InFile = $env:COC_RELEASE_UPLOAD_FILE
+      TimeoutSec = 300
+    }
+    $asset = Invoke-RestMethod @arguments
+    $asset | ConvertTo-Json -Depth 6 -Compress
+  `;
+  const { stdout } = await promisify(execFile)(shell, ['-NoProfile', '-NonInteractive', '-Command', command], {
+    windowsHide: true,
+    timeout: 320_000,
+    env: { ...process.env, COC_RELEASE_UPLOAD_URL: url.href, COC_RELEASE_UPLOAD_FILE: exePath }
+  });
+  return JSON.parse(stdout.trim());
 }
 
 async function main() {
@@ -80,6 +114,7 @@ async function main() {
       tag: { type: 'string' },
       commit: { type: 'string' },
       message: { type: 'string' },
+      powershell: { type: 'string' },
       'notes-file': { type: 'string' }
     }
   });
@@ -103,8 +138,11 @@ async function main() {
   const notes = values['notes-file']
     ? readFileSync(values['notes-file'], 'utf8').replace(/^\uFEFF/, '')
     : values.message || tag;
-  const data = readFileSync(join(root, `${productName}.exe`));
-  const { release, asset } = await publishRelease({ repo, tag, commit, notes, assetName, data, token });
+  const exePath = join(root, `${productName}.exe`);
+  const data = readFileSync(exePath);
+  const sendAsset = values.powershell && ((url) => uploadWithPowerShell(values.powershell, url, exePath));
+  console.log(`正在发布 ${tag} 的附件 ${assetName}（${data.length} 字节）`);
+  const { release, asset } = await publishRelease({ repo, tag, commit, notes, assetName, data, token }, fetch, sendAsset);
   console.log(`Release 页面：${release.html_url}`);
   console.log(`下载地址：${asset.browser_download_url}`);
 }

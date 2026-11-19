@@ -224,7 +224,9 @@ if ($LASTEXITCODE -ne 0) { Die '推送失败（多半是没登录，见下方提
 Ok '推送完成'
 
 Step 5 '上传 GitHub Release'
-$releaseArgs = @('--repo', $repository, '--tag', $tag, '--commit', $commit)
+$shellName = if ($PSVersionTable.PSEdition -eq 'Desktop') { 'powershell.exe' } else { 'pwsh.exe' }
+$shellPath = Join-Path $PSHOME $shellName
+$releaseArgs = @('--repo', $repository, '--tag', $tag, '--commit', $commit, '--powershell', $shellPath)
 if ($NotesFile) {
   $releaseArgs += @('--notes-file', $NotesFile)
 } else {

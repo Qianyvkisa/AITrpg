@@ -53,6 +53,18 @@ test('上传失败保留草稿，重试可清理未完成的上传占位并继�
   assert.match(retry.calls[1].url.pathname, /\/releases\/assets\/42$/);
 });
 
+test('由系统 HTTP 客户端传输附件，并在发布后返回正式下载链接', async () => {
+  const publishedAsset = { ...asset, browser_download_url: `https://github.com/test/keeper/releases/download/${options.tag}/${options.assetName}` };
+  const { calls, fetcher } = mock([200, [draft]], [200, { ...draft, draft: false, assets: [publishedAsset] }]);
+  const result = await publishRelease(options, fetcher, async (upload) => {
+    assert.equal(upload.origin, 'https://uploads.github.com');
+    assert.equal(upload.searchParams.get('name'), options.assetName);
+    return asset;
+  });
+  assert.deepEqual(calls.map((call) => call.method), ['GET', 'PATCH']);
+  assert.equal(result.asset.browser_download_url, publishedAsset.browser_download_url);
+});
+
 test('已经发布的相同附件可确认成功，内容不同时保留原附件', async () => {
   const published = { ...draft, draft: false, assets: [asset] };
   const same = mock([200, [published]]);
