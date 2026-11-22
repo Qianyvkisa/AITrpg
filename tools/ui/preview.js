@@ -8,8 +8,10 @@
 //
 // 用法：浏览器打开 tools/ui/index.html（建议窗口拉到 1440 以上）
 //      ?view=setup    只测设定界面（默认）
+//      ?view=start    只测开始界面
 //      ?view=game     只测跑团界面
-//      ?theme=abyss   指定主题（brass / abyss / phosphor / blood）
+//      ?view=settings 打开设置弹窗（可配 ?tab=theme 直达外观页）
+//      ?theme=pixel   指定主题（tentacle / pixel）
 //      ?rw=wide       指定阅读宽度（narrow / normal / wide）
 //      ?collapse=left|right|both  验证侧栏折叠后的布局
 //      ?measure=1     把实测几何写进 DOM，供 --dump-dom 抓取核对
@@ -54,9 +56,8 @@ window.api = {
 const params = new URLSearchParams(location.search);
 const view = params.get('view') || 'setup';
 
-// 主题与阅读宽度：支持 URL 参数，方便一次截图四种风格做对比
-applyTheme(params.get('theme'));
-applyReadWidth(params.get('rw'));
+const previewTheme = applyTheme(params.get('theme'));
+const previewWidth = applyReadWidth(params.get('rw'));
 
 // ---------------------------------------------------------------------------
 // 主界面（开始界面）：氛围层 + 母题 + 品牌区 + 菜单
@@ -109,14 +110,14 @@ function mountStartView() {
           <span class="mb-arrow" aria-hidden="true">→</span>
         </button>
 
-        <button class="menu-btn online" id="menuOnline">
+        <button class="menu-btn online" id="menuOnline" data-art="wave">
           <span class="mb-mark" aria-hidden="true"></span>
           <span class="mb-label">联机</span>
           <span class="mb-desc">开房当守密人，或加入朋友的房间</span>
           <span class="mb-arrow" aria-hidden="true">→</span>
         </button>
 
-        <button class="menu-btn danger" id="menuAbandon">
+        <button class="menu-btn danger" id="menuAbandon" data-art="skull">
           <span class="mb-mark" aria-hidden="true"></span>
           <span class="mb-label">放弃游戏</span>
           <span class="mb-desc">清除当前进度，重新开始</span>
@@ -126,11 +127,11 @@ function mountStartView() {
         <div class="menu-divider"><span class="md-gem" aria-hidden="true">◆</span></div>
 
         <div class="menu-mini-row">
-          <button class="menu-mini">角色卡</button>
-          <button class="menu-mini">存档</button>
-          <button class="menu-mini">模组管理</button>
-          <button class="menu-mini">规则书</button>
-          <button class="menu-mini">设置</button>
+          <button class="menu-mini" data-art="person">角色卡</button>
+          <button class="menu-mini" data-art="save">存档</button>
+          <button class="menu-mini" data-art="search">模组管理</button>
+          <button class="menu-mini" data-art="book">规则书</button>
+          <button class="menu-mini" data-art="gear">设置</button>
         </div>
       </nav>
 
@@ -183,14 +184,14 @@ function mountGameView() {
     </header>
     <main class="layout">
       <aside class="panel left-panel">
-        <div class="panel-head"><h2>调查员</h2><button class="icon-btn" id="btnNewChar">+</button></div>
+        <div class="panel-head"><h2 data-art="person">调查员</h2><button class="icon-btn" id="btnNewChar">+</button></div>
         <div id="charList" class="char-list"></div>
-        <div class="panel-head" style="margin-top:18px"><h2>队友</h2><button class="icon-btn" id="btnAddTeammate">+</button></div>
+        <div class="panel-head" style="margin-top:18px"><h2 data-art="lamp">队友</h2><button class="icon-btn" id="btnAddTeammate">+</button></div>
         <div id="teammateList" class="teammate-list"></div>
       </aside>
       <section class="panel center-panel">
         <div class="scene-bar">
-          <span class="scene-label">场景</span>
+          <span class="scene-label" data-art="lamp">场景</span>
           <span id="sceneName" class="scene-name">尚未开始</span>
           <span id="turnCounter" class="turn-counter"></span>
         </div>
@@ -198,17 +199,18 @@ function mountGameView() {
         <div class="composer">
           <textarea id="input" rows="2" placeholder="你要做什么？"></textarea>
           <div class="composer-actions">
-            <button class="btn" id="btnSend">行动</button>
+            <span class="composer-hint"><kbd>Enter</kbd> 发送　<kbd>Shift + Enter</kbd> 换行</span>
             <button class="btn ghost" id="btnAuto">队友插话</button>
+            <button class="btn" id="btnSend">行动</button>
           </div>
         </div>
       </section>
       <aside class="panel right-panel">
-        <div class="panel-head"><h2>状态</h2></div>
+        <div class="panel-head"><h2 data-art="eye">状态</h2></div>
         <div id="statusPane" class="status-pane"></div>
-        <div class="panel-head" style="margin-top:18px"><h2>线索</h2></div>
+        <div class="panel-head" style="margin-top:18px"><h2 data-art="search">线索</h2></div>
         <div id="clueList" class="clue-list"></div>
-        <div class="panel-head" style="margin-top:18px"><h2>日志</h2></div>
+        <div class="panel-head" style="margin-top:18px"><h2 data-art="die">日志</h2></div>
         <div id="rollLog" class="roll-log"></div>
       </aside>
     </main>`;
@@ -288,8 +290,8 @@ if (view === 'game') {
       baseUrl: 'http://localhost:11434/v1',
       model: 'qwen2.5:14b',
       apiKey: '',
-      uiTheme: params.get('theme') || 'brass',
-      readWidth: params.get('rw') || 'normal'
+      uiTheme: previewTheme,
+      readWidth: previewWidth
     }),
     setConfig: async () => ({ ok: true }),
     listModels: async () => ({ ok: true, models: ['qwen2.5:14b', 'llama3.1:8b'] })
@@ -355,6 +357,26 @@ if (params.get('measure') === '1') {
       report.center = center;
       report.right = right;
       report.messages = messages;
+
+      // 侧栏是否可滚动：截图里滚动条被 --hide-scrollbars 藏了，
+      // 「内容被裁切」和「能滚动」在图上长得一模一样，
+      // 所以把 scrollHeight/clientHeight 也测出来，靠数字区分。
+      const scrollInfo = (sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        return {
+          scrollH: el.scrollHeight,
+          clientH: el.clientHeight,
+          overflow: el.scrollHeight - el.clientHeight,
+          canScroll: el.scrollHeight > el.clientHeight + 1
+        };
+      };
+      report.scroll = {
+        left: scrollInfo('.left-panel'),
+        right: scrollInfo('.right-panel'),
+        messages: scrollInfo('#messages')
+      };
+
       // 三栏是否真的并排
       report.threeCols =
         left && center && right && Math.abs(left.y - center.y) < 4 && Math.abs(center.y - right.y) < 4;

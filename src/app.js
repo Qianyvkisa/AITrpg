@@ -78,9 +78,15 @@ function applyPanelVisibility() {
   // 按钮高亮表示「这一栏现在被我收起来了」。
   // 用 .off 而不是 .on：视觉上是「关掉了它」，语义比「打开了」清楚。
   const left = $('#btnToggleLeft');
-  if (left) left.classList.toggle('off', !!state.hideLeftPanel);
+  if (left) {
+    left.classList.toggle('off', !!state.hideLeftPanel);
+    left.setAttribute('aria-expanded', String(!state.hideLeftPanel));
+  }
   const right = $('#btnToggleRight');
-  if (right) right.classList.toggle('off', !!state.hideRightPanel);
+  if (right) {
+    right.classList.toggle('off', !!state.hideRightPanel);
+    right.setAttribute('aria-expanded', String(!state.hideRightPanel));
+  }
 }
 
 /**
@@ -88,15 +94,13 @@ function applyPanelVisibility() {
  * @param {'left'|'right'} side
  */
 function togglePanel(side) {
+  const log = $('#messages');
+  const following = log && log.scrollHeight - log.clientHeight - log.scrollTop <= 32;
   if (side === 'left') state.hideLeftPanel = !state.hideLeftPanel;
   else state.hideRightPanel = !state.hideRightPanel;
   applyPanelVisibility();
 
-  // 折叠会让叙事区变宽，行宽变了但内容位置没动，滚动位置看起来会「跳一下」。
-  // 折起来的时候顺手回到底部：玩家折叠侧栏多半是想接着读最新内容。
-  if (state.hideLeftPanel || state.hideRightPanel) {
-    scrollToBottom({ force: true });
-  }
+  if (following) scrollToBottom({ force: true });
 }
 
 /** 进入跑团界面（重建消息流 + 全量重绘） */
@@ -592,12 +596,14 @@ function updateRollGate() {
 
   if (sendBtn) {
     sendBtn.disabled = disabled;
-    sendBtn.textContent = pending ? '先掷骰' : retry ? '继续叙事' : (state.mode === 'spectator' ? '推进' : '行动');
+    const label = pending ? '先掷骰' : busy ? '叙事中…' : retry ? '继续叙事' : (state.mode === 'spectator' ? '推进' : '行动');
+    if (sendBtn.textContent !== label) sendBtn.textContent = label;
   }
   if (input) {
     input.disabled = !!clientHint || pending || state.scenario.ended || retry;
     input.placeholder = clientHint || (pending ? '等待对应调查员完成检定…'
-      : retry ? '请继续守密人的叙事…' : '描述你的行动…');
+      : retry ? '请继续守密人的叙事…'
+      : state.mode === 'spectator' ? '输入剧情指示，或留空直接推进…' : '描述你的行动…');
   }
   const pendingRolls = pending ? new Map(engine.pendingRolls().map((roll) => [roll.id, roll])) : new Map();
   for (const button of document.querySelectorAll('.roll-btn')) {

@@ -5,7 +5,7 @@
 // 「exe 能开、界面全白」，用户不会去翻 asar，只会说「打包坏了」。
 // 所以每次打包后跑一次这个。
 import asar from '@electron/asar';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const ASAR = fileURLToPath(new URL('../dist/win-unpacked/resources/app.asar', import.meta.url));
@@ -24,6 +24,8 @@ const REQUIRED = [
   '/src/state.js',
   '/src/styles.css',
   '/src/themes.css',
+  '/src/motif-art.css',
+  '/src/tentacle.css',
   '/src/ui/theme.js',
   '/src/modals/settings.js',
   '/src/core/autoAdvance.js',
@@ -32,8 +34,13 @@ const REQUIRED = [
   '/preload.js'
 ];
 
-const html = readFileSync(new URL('../src/index.html', import.meta.url), 'utf8');
-if (html.includes('href="motif-art.css"')) REQUIRED.push('/src/motif-art.css');
+const themeCss = norm.has('/src/tentacle.css')
+  ? asar.extractFile(ASAR, 'src/tentacle.css').toString('utf8')
+  : '';
+for (const [, name] of themeCss.matchAll(/url\('assets\/tentacle\/([\w-]+\.webp)'\)/g)) {
+  const path = `/src/assets/tentacle/${name}`;
+  if (!REQUIRED.includes(path)) REQUIRED.push(path);
+}
 
 let bad = 0;
 if (norm.has('/assets/coc-kp.pdf')) {
@@ -45,6 +52,10 @@ for (const entry of norm) {
     console.log('包含运行日志 ' + entry);
     bad++;
   }
+}
+if (norm.has('/assets/资源')) {
+  console.log('包含美术源素材目录');
+  bad++;
 }
 for (const f of REQUIRED) {
   const hit = norm.has(f);

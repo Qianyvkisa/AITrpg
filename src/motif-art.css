@@ -1,0 +1,95 @@
+/* ===========================================================================
+   主题图形素材（自动生成，请勿手改）
+   ===========================================================================
+
+   由 tools/gen-pixel-motif.mjs 生成，重跑即可覆盖：
+       node tools/gen-pixel-motif.mjs            # 重新生成
+       node tools/gen-pixel-motif.mjs --preview  # 顺带在终端打印 ASCII 形状
+
+   这里只放 data URI 形式的图形，不含任何颜色。
+   颜色由 themes.css 用 mask + background-color 提供 ——
+   如果把这些 SVG 写成彩色图，换主题时图案不会跟着变色，
+   会出现「冰蓝主题配琥珀金旧印」这种明显穿帮。
+
+   加载顺序：motif-art.css → themes.css → styles.css
+   themes.css 里的 --motif-mask / --motif-emblem 直接引用下面的 --art-* 变量。
+
+   ---------------------------------------------------------------------------
+   为什么图形是算法生成而不是手画
+   ---------------------------------------------------------------------------
+   像素图案的全部视觉质量都押在「每个方块都在整数格上、边缘是直角阶梯」。
+   手写几百个 rect 的坐标一定会漏格、错位、出现小数，改一次星形比例就得
+   全部重算。生成器用 point-in-polygon 判定格子、再按行合并连续格子，
+   坐标天然是整数，体积也小（130 多个 rect 压到一行）。
+
+   三条硬约束（违反直接白屏或测试失败）：
+     1) SVG 内不能出现 }    —— theme.test.mjs 的正则按第一个 } 截断主题块
+     2) SVG 内不能出现 #    —— data URI 里必须写成 %23，所以图形全程无色值
+     3) 属性一律用单引号    —— 避免和外层 url("...") 的双引号打架
+   生成器对三条都有断言，改了图案不用自己记着检查。
+
+   ---------------------------------------------------------------------------
+   各图案的用途
+   ---------------------------------------------------------------------------
+   --art-emblem   旧印（Elder Sign）。五角星线稿 + 中心眼 + 磨损外框。
+                  独幅符号，绝不平铺 —— 平铺会让满屏出现十几个朝向相同的
+                  五角星，人眼立刻看出是同一张图在重复（上一版母题就是这么
+                  被否掉的）。四套主题共用这一张，靠 opacity / blur 区分用法。
+
+   --art-stone    像素石纹。碎块 + 砂粒，格子全在 [1, n-2] 内不碰边缘，
+                  所以四边拼接无缝。只给「像素写实」做平铺底纹。
+
+   --art-hatch    铜版交叉排线。45° 直线，角对角对齐可无缝拼接。
+                  这是真实版画工艺，直线平铺天然合理，不会有贴纸感。
+
+   --art-noise    颗粒噪点。亚克力磨砂与录像带共用，靠 opacity 区分强度。
+
+   --art-scan     录像带扫描线。每 4px 一条 1px 暗线。
+   =========================================================================== */
+
+:root {
+  /* 旧印：40 格 → 480px，133 个 rect */
+  --art-emblem: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40' shape-rendering='crispEdges'><g fill='black'><rect x='1' y='1' width='18' height='1'/><rect x='21' y='1' width='18' height='1'/><rect x='1' y='2' width='1' height='1'/><rect x='38' y='2' width='1' height='1'/><rect x='1' y='3' width='1' height='1'/><rect x='38' y='3' width='1' height='1'/><rect x='1' y='4' width='1' height='1'/><rect x='38' y='4' width='1' height='1'/><rect x='1' y='5' width='1' height='1'/><rect x='38' y='5' width='1' height='1'/><rect x='1' y='6' width='1' height='1'/><rect x='19' y='6' width='2' height='1'/><rect x='38' y='6' width='1' height='1'/><rect x='1' y='7' width='1' height='1'/><rect x='19' y='7' width='2' height='1'/><rect x='38' y='7' width='1' height='1'/><rect x='1' y='8' width='1' height='1'/><rect x='19' y='8' width='2' height='1'/><rect x='38' y='8' width='1' height='1'/><rect x='1' y='9' width='1' height='1'/><rect x='18' y='9' width='4' height='1'/><rect x='38' y='9' width='1' height='1'/><rect x='1' y='10' width='1' height='1'/><rect x='18' y='10' width='1' height='1'/><rect x='21' y='10' width='1' height='1'/><rect x='38' y='10' width='1' height='1'/><rect x='1' y='11' width='1' height='1'/><rect x='18' y='11' width='1' height='1'/><rect x='21' y='11' width='1' height='1'/><rect x='38' y='11' width='1' height='1'/><rect x='1' y='12' width='1' height='1'/><rect x='17' y='12' width='2' height='1'/><rect x='21' y='12' width='2' height='1'/><rect x='38' y='12' width='1' height='1'/><rect x='1' y='13' width='1' height='1'/><rect x='17' y='13' width='1' height='1'/><rect x='22' y='13' width='1' height='1'/><rect x='38' y='13' width='1' height='1'/><rect x='1' y='14' width='1' height='1'/><rect x='17' y='14' width='1' height='1'/><rect x='22' y='14' width='1' height='1'/><rect x='38' y='14' width='1' height='1'/><rect x='1' y='15' width='1' height='1'/><rect x='5' y='15' width='13' height='1'/><rect x='22' y='15' width='13' height='1'/><rect x='38' y='15' width='1' height='1'/><rect x='1' y='16' width='1' height='1'/><rect x='7' y='16' width='2' height='1'/><rect x='31' y='16' width='2' height='1'/><rect x='38' y='16' width='1' height='1'/><rect x='1' y='17' width='1' height='1'/><rect x='8' y='17' width='3' height='1'/><rect x='19' y='17' width='2' height='1'/><rect x='29' y='17' width='3' height='1'/><rect x='38' y='17' width='1' height='1'/><rect x='1' y='18' width='1' height='1'/><rect x='10' y='18' width='2' height='1'/><rect x='18' y='18' width='4' height='1'/><rect x='28' y='18' width='2' height='1'/><rect x='38' y='18' width='1' height='1'/><rect x='11' y='19' width='2' height='1'/><rect x='17' y='19' width='6' height='1'/><rect x='27' y='19' width='2' height='1'/><rect x='12' y='20' width='3' height='1'/><rect x='17' y='20' width='6' height='1'/><rect x='25' y='20' width='3' height='1'/><rect x='1' y='21' width='1' height='1'/><rect x='14' y='21' width='1' height='1'/><rect x='18' y='21' width='4' height='1'/><rect x='25' y='21' width='1' height='1'/><rect x='38' y='21' width='1' height='1'/><rect x='1' y='22' width='1' height='1'/><rect x='14' y='22' width='1' height='1'/><rect x='19' y='22' width='2' height='1'/><rect x='25' y='22' width='1' height='1'/><rect x='38' y='22' width='1' height='1'/><rect x='1' y='23' width='1' height='1'/><rect x='14' y='23' width='1' height='1'/><rect x='25' y='23' width='1' height='1'/><rect x='38' y='23' width='1' height='1'/><rect x='1' y='24' width='1' height='1'/><rect x='13' y='24' width='2' height='1'/><rect x='25' y='24' width='2' height='1'/><rect x='38' y='24' width='1' height='1'/><rect x='1' y='25' width='1' height='1'/><rect x='13' y='25' width='1' height='1'/><rect x='18' y='25' width='4' height='1'/><rect x='26' y='25' width='1' height='1'/><rect x='38' y='25' width='1' height='1'/><rect x='1' y='26' width='1' height='1'/><rect x='13' y='26' width='1' height='1'/><rect x='17' y='26' width='2' height='1'/><rect x='21' y='26' width='2' height='1'/><rect x='26' y='26' width='1' height='1'/><rect x='38' y='26' width='1' height='1'/><rect x='1' y='27' width='1' height='1'/><rect x='12' y='27' width='2' height='1'/><rect x='16' y='27' width='2' height='1'/><rect x='22' y='27' width='2' height='1'/><rect x='26' y='27' width='2' height='1'/><rect x='38' y='27' width='1' height='1'/><rect x='1' y='28' width='1' height='1'/><rect x='12' y='28' width='1' height='1'/><rect x='14' y='28' width='3' height='1'/><rect x='23' y='28' width='3' height='1'/><rect x='27' y='28' width='1' height='1'/><rect x='38' y='28' width='1' height='1'/><rect x='1' y='29' width='1' height='1'/><rect x='12' y='29' width='3' height='1'/><rect x='25' y='29' width='3' height='1'/><rect x='38' y='29' width='1' height='1'/><rect x='1' y='30' width='1' height='1'/><rect x='11' y='30' width='3' height='1'/><rect x='26' y='30' width='3' height='1'/><rect x='38' y='30' width='1' height='1'/><rect x='1' y='31' width='1' height='1'/><rect x='11' y='31' width='2' height='1'/><rect x='27' y='31' width='2' height='1'/><rect x='38' y='31' width='1' height='1'/><rect x='1' y='32' width='1' height='1'/><rect x='38' y='32' width='1' height='1'/><rect x='1' y='33' width='1' height='1'/><rect x='38' y='33' width='1' height='1'/><rect x='1' y='34' width='1' height='1'/><rect x='38' y='34' width='1' height='1'/><rect x='1' y='35' width='1' height='1'/><rect x='38' y='35' width='1' height='1'/><rect x='1' y='36' width='1' height='1'/><rect x='38' y='36' width='1' height='1'/><rect x='1' y='37' width='1' height='1'/><rect x='38' y='37' width='1' height='1'/><rect x='1' y='38' width='18' height='1'/><rect x='21' y='38' width='18' height='1'/></g></svg>");
+  --art-emblem-size: 480px;
+
+  /* 像素石纹：16 格 → 192px，15 个 rect */
+  --art-stone: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' shape-rendering='crispEdges'><g fill='black'><rect x='7' y='1' width='1' height='1'/><rect x='10' y='2' width='2' height='1'/><rect x='10' y='3' width='1' height='1'/><rect x='1' y='4' width='1' height='1'/><rect x='7' y='4' width='1' height='1'/><rect x='12' y='5' width='1' height='1'/><rect x='1' y='7' width='1' height='1'/><rect x='8' y='10' width='1' height='1'/><rect x='1' y='12' width='2' height='1'/><rect x='5' y='12' width='2' height='1'/><rect x='1' y='13' width='1' height='1'/><rect x='5' y='13' width='1' height='1'/><rect x='10' y='13' width='2' height='1'/><rect x='1' y='14' width='1' height='1'/><rect x='10' y='14' width='1' height='1'/></g></svg>");
+  --art-stone-size: 192px;
+
+  /* 铜版排线：24px 单元 */
+  --art-hatch: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><g stroke='black' stroke-width='1'><path d='M0 24 L24 0'/><path d='M-6 6 L6 -6'/><path d='M18 30 L30 18'/><path d='M0 0 L24 24'/><path d='M-6 18 L6 30'/><path d='M18 -6 L30 6'/></g></svg>");
+  --art-hatch-size: 24px;
+
+  /* 颗粒噪点：64 格，78 个 rect */
+  --art-noise: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64' shape-rendering='crispEdges'><g fill='black'><rect x='2' y='1' width='1' height='1'/><rect x='59' y='1' width='1' height='1'/><rect x='62' y='1' width='1' height='1'/><rect x='5' y='2' width='1' height='1'/><rect x='19' y='2' width='1' height='1'/><rect x='58' y='3' width='1' height='1'/><rect x='9' y='4' width='1' height='1'/><rect x='21' y='4' width='1' height='1'/><rect x='47' y='4' width='1' height='1'/><rect x='28' y='5' width='1' height='1'/><rect x='60' y='5' width='1' height='1'/><rect x='0' y='6' width='1' height='1'/><rect x='0' y='9' width='1' height='1'/><rect x='56' y='10' width='1' height='1'/><rect x='24' y='11' width='1' height='1'/><rect x='51' y='11' width='1' height='1'/><rect x='50' y='13' width='1' height='1'/><rect x='60' y='13' width='1' height='1'/><rect x='63' y='13' width='1' height='1'/><rect x='8' y='14' width='1' height='1'/><rect x='41' y='15' width='1' height='1'/><rect x='55' y='15' width='1' height='1'/><rect x='60' y='16' width='1' height='1'/><rect x='41' y='17' width='1' height='1'/><rect x='48' y='17' width='1' height='1'/><rect x='46' y='19' width='1' height='1'/><rect x='8' y='20' width='1' height='1'/><rect x='13' y='21' width='1' height='1'/><rect x='34' y='22' width='1' height='1'/><rect x='46' y='22' width='1' height='1'/><rect x='5' y='23' width='1' height='1'/><rect x='20' y='25' width='1' height='1'/><rect x='29' y='25' width='1' height='1'/><rect x='58' y='27' width='1' height='1'/><rect x='30' y='28' width='1' height='1'/><rect x='22' y='29' width='1' height='1'/><rect x='24' y='29' width='1' height='1'/><rect x='44' y='29' width='1' height='1'/><rect x='52' y='31' width='1' height='1'/><rect x='39' y='32' width='1' height='1'/><rect x='48' y='33' width='1' height='1'/><rect x='59' y='34' width='1' height='1'/><rect x='4' y='35' width='1' height='1'/><rect x='58' y='36' width='1' height='1'/><rect x='61' y='36' width='1' height='1'/><rect x='32' y='38' width='1' height='1'/><rect x='8' y='39' width='1' height='1'/><rect x='18' y='39' width='1' height='1'/><rect x='26' y='40' width='1' height='1'/><rect x='54' y='40' width='1' height='1'/><rect x='30' y='41' width='1' height='1'/><rect x='33' y='42' width='1' height='1'/><rect x='51' y='42' width='1' height='1'/><rect x='1' y='45' width='1' height='1'/><rect x='45' y='46' width='1' height='1'/><rect x='56' y='46' width='1' height='1'/><rect x='60' y='46' width='2' height='1'/><rect x='6' y='47' width='1' height='1'/><rect x='35' y='47' width='1' height='1'/><rect x='60' y='47' width='1' height='1'/><rect x='32' y='48' width='1' height='1'/><rect x='38' y='49' width='1' height='1'/><rect x='48' y='49' width='1' height='1'/><rect x='13' y='50' width='1' height='1'/><rect x='18' y='50' width='1' height='1'/><rect x='37' y='50' width='1' height='1'/><rect x='46' y='50' width='1' height='1'/><rect x='47' y='52' width='1' height='1'/><rect x='34' y='53' width='1' height='1'/><rect x='2' y='54' width='1' height='1'/><rect x='8' y='55' width='1' height='1'/><rect x='58' y='56' width='1' height='1'/><rect x='23' y='57' width='1' height='1'/><rect x='7' y='59' width='1' height='1'/><rect x='36' y='60' width='1' height='1'/><rect x='27' y='61' width='1' height='1'/><rect x='42' y='61' width='1' height='1'/><rect x='21' y='62' width='1' height='1'/></g></svg>");
+  --art-noise-size: 64px;
+
+  /* 录像带扫描线：4px 单元 */
+  --art-scan: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4' viewBox='0 0 4 4'><g fill='black'><rect x='0' y='0' width='4' height='1'/></g></svg>");
+  --art-scan-size: 4px;
+
+  /* ---------------------------------------------------------------------------
+     彩色材质纹理（唯一不遵守「单色蒙版」约定的素材）
+     ---------------------------------------------------------------------------
+     上面所有 --art-* 都是纯黑剪影，颜色由 CSS 的 background-color 注入。
+     这一张不同：它要表现材质固有色（海底石头的青灰、苔藓的墨绿、木桌的棕黄），
+     所以允许带 4~6 级色阶。
+
+     默认 none —— 没有图片时不绘制任何东西，现有观感完全不变。
+     换上图片后由 themes.css 的 --art-stone-color 指向实际文件：
+
+       --art-stone-color: url("../assets/ui/pixel/tile-color.png");
+
+     ⚠ 替换时必须保持「硬边 + 限色 + 四边无缝」三条，
+       否则它会在满屏平铺时露馅（见 assets/UI-ART-PROMPTS.md §0.4）。
+     ⚠ 它和 --art-stone 是配套的：单色版管形状和主题色，彩色版管材质固有色，
+       两张图的格数和图案必须对得上，否则叠在一起会错位。
+     --------------------------------------------------------------------------- */
+  --art-stone-color: none;
+  --art-stone-color-size: 192px;
+  /* 彩色层的不透明度。比单色母题层低，因为它是打底的，不能抢主题强调色。
+     四套主题当前都是 0（还没有彩色图），换图后按需调到 .10~.18。
+     放在这里而不是各主题块里：它和上面的图片是配套的，
+     分散到四个主题块会让人以为要分别调，实际只需要一个值。 */
+  --motif-color-opacity: 0;
+}

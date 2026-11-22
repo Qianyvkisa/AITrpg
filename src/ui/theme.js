@@ -1,81 +1,28 @@
-// ---------------------------------------------------------------------------
-// 美术风格：主题与阅读宽度
-//
-// 这一层只做三件事：
-//   1) 列出可选档位（供设置面板渲染）
-//   2) 校验并归一化用户传入的值（脏配置不能把界面搞花）
-//   3) 把结果写到 <html> 的 data 属性上
-//
-// 为什么用 data 属性而不是直接改 CSS 变量：
-// 变量散在 600 多处，逐个 setProperty 既慢又容易漏；
-// 一个 data-theme 让浏览器自己重算层叠，切换是原子性的，
-// 不会出现「换到一半颜色混合」的中间态。
-//
-// 为什么不在这里 import 任何 DOM 之外的东西：
-// 这个模块要能在测试里直接跑（node 环境没有 document），
-// 所以所有 DOM 访问都做了存在性判断。
-// ---------------------------------------------------------------------------
-
-/** 可选主题。顺序即设置面板里的显示顺序 */
+/* 主题定义。保存的是稳定的主题 id，旧 id 回落到当前默认主题。 */
 export const THEMES = [
   {
-    id: 'brass',
-    name: '黄铜档案',
-    desc: '陈旧黄铜与深墨底，衬线标题。档案柜里压着的一张禁忌拓片。',
-    // 母题名称：设置面板里显示，让玩家知道「这套风格长什么样」
-    motif: '缠绕触手',
-    // 三个色块：强调色 / 深底 / 面板底（供需要纯色块的场合使用）
-    swatch: ['#b8894a', '#0a0b0f', '#171b24'],
-    // 缩略预览：图案形状（SVG data URI）、平铺尺寸、底色、强调色
-    preview: {
-      mask: "url(\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'><g fill='none' stroke='black' stroke-width='7' stroke-linecap='round'><path d='M-6 14 C16 16 30 26 32 46 C34 62 22 72 24 88 C25 100 36 108 50 110'/><path d='M126 26 C104 28 92 40 90 58 C88 74 98 84 96 98'/></g><g fill='black'><circle cx='20' cy='22' r='2.6'/><circle cx='31' cy='40' r='3'/><circle cx='26' cy='66' r='2.4'/><circle cx='102' cy='36' r='3'/><circle cx='92' cy='58' r='2.6'/></g></svg>\")",
-      size: '60px 60px',
-      bg: '#0a0b0f',
-      accent: '#b8894a'
-    }
+    id: 'tentacle',
+    name: '触手 · 深海遗迹',
+    motif: '旧金与暗潮',
+    desc: '像素海底插画、旧金操作件与深色调查卷宗。',
+    swatch: ['#f1c47e', '#100c16', '#1c1624']
   },
   {
-    id: 'abyss',
-    name: '深海幽蓝',
-    desc: '冷青蓝底与青绿强调，圆角放大，像潜水器的操作界面。',
-    motif: '水波气泡',
-    swatch: ['#3fa8b8', '#06090f', '#131b26'],
+    id: 'pixel',
+    name: '像素写实',
+    motif: '经典备份',
+    desc: '原默认主题。琥珀金、像素石纹与硬边描框。',
+    swatch: ['#e8b04a', '#0a0812', '#13101d'],
     preview: {
-      mask: "url(\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'><g fill='none' stroke='black' stroke-width='1.6'><circle cx='60' cy='60' r='14'/><circle cx='60' cy='60' r='28'/><circle cx='60' cy='60' r='42'/><circle cx='60' cy='60' r='55'/></g><g fill='black'><circle cx='18' cy='22' r='3'/><circle cx='100' cy='16' r='2.2'/><circle cx='34' cy='98' r='2.6'/></g></svg>\")",
-      size: '60px 60px',
-      bg: '#06090f',
-      accent: '#3fa8b8'
-    }
-  },
-  {
-    id: 'phosphor',
-    name: '磷光终端',
-    desc: '单色磷光绿、全等宽字体、零圆角，叠一层 CRT 扫描线。',
-    motif: '点阵字符',
-    swatch: ['#4fd47f', '#040604', '#0d130d'],
-    preview: {
-      mask: "url(\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><g fill='black'><circle cx='2' cy='2' r='.9'/><circle cx='8' cy='2' r='.9'/><circle cx='5' cy='6' r='.9'/><circle cx='11' cy='6' r='.9'/><circle cx='2' cy='10' r='.9'/><circle cx='8' cy='10' r='.9'/></g></svg>\")",
-      size: '12px 12px',
-      bg: '#040604',
-      accent: '#4fd47f'
-    }
-  },
-  {
-    id: 'blood',
-    name: '血月绯红',
-    desc: '暗红紫底与陶土金强调，圆角最大。被什么东西从内部撑裂的岩壁。',
-    motif: '蛛网裂纹',
-    swatch: ['#c47a5a', '#0c0708', '#1b1216'],
-    preview: {
-      mask: "url(\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'><g fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M60 60 L48 32 L52 8'/><path d='M60 60 L88 48 L106 52'/><path d='M60 60 L82 84 L86 106'/><path d='M60 60 L32 74 L12 70'/><path d='M48 32 L34 26 M88 48 L96 32 M82 84 L64 96'/></g></svg>\")",
-      size: '60px 60px',
-      bg: '#0c0708',
-      accent: '#c47a5a'
+      mask: 'var(--art-stone)',
+      size: '64px 64px',
+      bg: '#0a0812',
+      accent: '#e8b04a'
     }
   }
 ];
 
-export const DEFAULT_THEME = 'brass';
+export const DEFAULT_THEME = 'tentacle';
 
 /** 可选阅读宽度。数值在 themes.css 里定义（--read-width） */
 export const READ_WIDTHS = [

@@ -11,8 +11,7 @@
 //   点主题卡片立刻 applyTheme，不写盘——用户要能看到效果才决定。
 //   点「取消 / × / 遮罩」时回滚到打开面板时的值；
 //   只有点「保存」才写进 config.json。
-//   因为 openModal 返回的 close 不感知「是否保存过」，
-//   这里自己包一层 closeModal，所有关闭路径都走它。
+//   弹窗的 onClose 回调负责统一回滚。
 // ---------------------------------------------------------------------------
 import { openModal } from './shell.js';
 import { escapeHtml } from '../shared/text.js';
@@ -36,6 +35,7 @@ const TABS = [
 ];
 
 export async function openSettings(state, onChanged) {
+  const trigger = document.activeElement;
   const cfg = await window.api.getConfig();
 
   // 打开面板时的外观值，用于「未保存就关闭」时回滚
@@ -53,10 +53,10 @@ export async function openSettings(state, onChanged) {
   // ⚠ 图案的 data URI 里带单引号（SVG 属性用单引号避免和 HTML 双引号打架），
   //   所以不能塞进 style="..." 属性——单双引号会互相截断，
   //   浏览器把剩下的 `motif-...` 当成属性名，卡片上直接显示成文字（踩过）。
-  //   这里只写 data-theme-id，图案由 applySwatchVars() 用 JS 设到 element.style 上。
+  //   这里只写 data-theme-id，使用像素纹理的卡片通过 element.style 设置变量。
   const themeCards = THEMES.map((t) => `
-    <button class="theme-opt ${t.id === pickedTheme ? 'on' : ''}" data-theme-id="${t.id}" type="button">
-      <span class="theme-swatch" data-swatch-for="${t.id}"></span>
+    <button class="theme-opt ${t.id === pickedTheme ? 'on' : ''}" data-theme-id="${t.id}" type="button" aria-pressed="${t.id === pickedTheme}">
+      <span class="theme-swatch" data-swatch-for="${t.id}" aria-hidden="true"></span>
       <span class="theme-body">
         <span class="theme-name">${escapeHtml(t.name)}</span>
         <span class="theme-motif">${escapeHtml(t.motif || '')}</span>
@@ -66,26 +66,27 @@ export async function openSettings(state, onChanged) {
   `).join('');
 
   const widthCards = READ_WIDTHS.map((w) => `
-    <button class="rw-opt ${w.id === pickedWidth ? 'on' : ''}" data-rw-id="${w.id}" type="button">
+    <button class="rw-opt ${w.id === pickedWidth ? 'on' : ''}" data-rw-id="${w.id}" type="button" aria-pressed="${w.id === pickedWidth}">
       <span class="rw-name">${escapeHtml(w.name)}</span>
       <span class="rw-desc">${escapeHtml(w.desc)}</span>
     </button>
   `).join('');
 
   const tabsHtml = TABS.map((t, i) => `
-    <button class="st-tab ${i === 0 ? 'on' : ''}" data-tab="${t.id}" type="button">${t.name}</button>
+    <button class="st-tab ${i === 0 ? 'on' : ''}" data-tab="${t.id}" id="settings-tab-${t.id}" type="button" role="tab" aria-controls="settings-pane-${t.id}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}">${t.name}</button>
   `).join('');
 
-  const { backdrop, close } = openModal(`
-    <div class="modal wide">
+  let saved = false;
+  const { backdrop, close: closeModal } = openModal(`
+    <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div class="modal-head">
-        <h2>设置</h2>
-        <button class="icon-btn" data-close>×</button>
+        <h2 id="settings-title">设置</h2>
+        <button class="icon-btn" data-close aria-label="关闭设置">×</button>
       </div>
-      <div class="st-tabs">${tabsHtml}</div>
+      <div class="st-tabs" role="tablist" aria-label="设置分类">${tabsHtml}</div>
       <div class="modal-body">
         <!-- ================= 模型 ================= -->
-        <div class="st-pane" data-pane="model">
+        <div class="st-pane" data-pane="model" id="settings-pane-model" role="tabpanel" aria-labelledby="settings-tab-model">
           <section class="field-group">
             <h3>KP（守密人）模型</h3>
             <label class="field">
@@ -149,7 +150,7 @@ export async function openSettings(state, onChanged) {
         </div>
 
         <!-- ================= 叙事 ================= -->
-        <div class="st-pane" data-pane="story" hidden>
+        <div class="st-pane" data-pane="story" id="settings-pane-story" role="tabpanel" aria-labelledby="settings-tab-story" hidden>
           <section class="field-group">
             <h3>叙事基调</h3>
             <div class="tone-picker" id="tonePicker">
@@ -187,11 +188,11 @@ export async function openSettings(state, onChanged) {
         </div>
 
         <!-- ================= 外观 ================= -->
-        <div class="st-pane" data-pane="theme" hidden>
+        <div class="st-pane" data-pane="theme" id="settings-pane-theme" role="tabpanel" aria-labelledby="settings-tab-theme" hidden>
           <section class="field-group">
             <h3>美术风格</h3>
             <div class="theme-picker">${themeCards}</div>
-            <em class="hint">点一下立刻预览，点「保存」才会记住。四套都是暗色系，配合克苏鲁的夜间调查氛围。</em>
+            <em class="hint">选择即可预览，保存后应用。</em>
           </section>
 
           <section class="field-group">
@@ -203,65 +204,62 @@ export async function openSettings(state, onChanged) {
       </div>
       <div class="modal-foot">
         <button class="btn ghost" id="btnTest">测试连接</button>
-        <span class="test-result" id="testRes"></span>
+        <span class="test-result" id="testRes" role="status"></span>
         <button class="btn" id="btnSaveCfg">保存</button>
       </div>
     </div>
-  `);
-
-  // -------------------------------------------------------------------------
-  // 关闭：未保存则回滚外观
-  // -------------------------------------------------------------------------
-  let saved = false;
-
-  /** 统一的关闭入口：所有关闭路径都走这里，保证回滚一定发生 */
-  const closeModal = () => {
+  `, { onClose: () => {
     if (!saved) {
-      // 预览过但没保存：把界面还原成打开面板时的样子
       applyTheme(originTheme);
       applyReadWidth(originWidth);
       state.uiTheme = originTheme;
       state.readWidth = originWidth;
     }
-    close();
-  };
-
-  // openModal 已经给 [data-close] 绑了 close()，这里覆盖掉，
-  // 让 × 按钮也走带回滚的版本。
-  backdrop.querySelectorAll('[data-close]').forEach((b) => {
-    b.onclick = closeModal;
-  });
-  // 遮罩点击同理。openModal 内部用的是 bindBackdropClose(backdrop, close)，
-  // 无法从外部替换，所以在捕获阶段拦一次：只在「真的点到遮罩空白」时生效。
-  let downOnBackdrop = null;
-  backdrop.addEventListener('mousedown', (e) => { downOnBackdrop = e.target; }, true);
-  backdrop.addEventListener('mouseup', (e) => {
-    const both = downOnBackdrop === backdrop && e.target === backdrop;
-    downOnBackdrop = null;
-    if (both) {
-      // 先让 openModal 自己的 handler 把弹窗移除，再回滚。
-      // 用 setTimeout(0) 排到它后面，避免和它的 close() 抢顺序。
-      setTimeout(() => {
-        if (!saved) {
-          applyTheme(originTheme);
-          applyReadWidth(originWidth);
-          state.uiTheme = originTheme;
-          state.readWidth = originWidth;
-        }
-      }, 0);
-    }
-  }, true);
+    if (trigger?.isConnected) trigger.focus();
+  } });
 
   // -------------------------------------------------------------------------
   // tab 切换
   // -------------------------------------------------------------------------
   const panes = backdrop.querySelectorAll('.st-pane');
-  backdrop.querySelectorAll('.st-tab').forEach((tab) => {
-    tab.onclick = () => {
-      const id = tab.dataset.tab;
-      backdrop.querySelectorAll('.st-tab').forEach((t) => t.classList.toggle('on', t === tab));
-      panes.forEach((p) => { p.hidden = p.dataset.pane !== id; });
+  const tabs = [...backdrop.querySelectorAll('.st-tab')];
+  const testButton = backdrop.querySelector('#btnTest');
+  const testStatus = backdrop.querySelector('#testRes');
+  function selectTab(tab) {
+    tabs.forEach((item) => {
+      item.classList.toggle('on', item === tab);
+      item.setAttribute('aria-selected', String(item === tab));
+      item.tabIndex = item === tab ? 0 : -1;
+    });
+    panes.forEach((pane) => { pane.hidden = pane.dataset.pane !== tab.dataset.tab; });
+    testButton.hidden = testStatus.hidden = tab.dataset.tab !== 'model';
+  }
+  tabs.forEach((tab, index) => {
+    tab.onclick = () => selectTab(tab);
+    tab.onkeydown = (event) => {
+      const last = tabs.length - 1;
+      const next = { ArrowLeft: (index + last) % tabs.length, ArrowRight: (index + 1) % tabs.length, Home: 0, End: last }[event.key];
+      if (next === undefined) return;
+      event.preventDefault();
+      selectTab(tabs[next]);
+      tabs[next].focus();
     };
+  });
+  tabs[0].focus();
+  backdrop.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeModal();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = [...backdrop.querySelectorAll('button, input, select, textarea, a[href]')]
+      .filter((item) => item.tabIndex >= 0 && !item.disabled && item.getClientRects().length);
+    const edge = event.shiftKey ? focusable[0] : focusable.at(-1);
+    if (document.activeElement === edge) {
+      event.preventDefault();
+      (event.shiftKey ? focusable.at(-1) : focusable[0])?.focus();
+    }
   });
 
   // -------------------------------------------------------------------------
@@ -286,7 +284,10 @@ export async function openSettings(state, onChanged) {
   backdrop.querySelectorAll('.theme-opt').forEach((card) => {
     card.onclick = () => {
       pickedTheme = normalizeTheme(card.dataset.themeId);
-      backdrop.querySelectorAll('.theme-opt').forEach((c) => c.classList.toggle('on', c === card));
+      backdrop.querySelectorAll('.theme-opt').forEach((option) => {
+        option.classList.toggle('on', option === card);
+        option.setAttribute('aria-pressed', String(option === card));
+      });
       applyTheme(pickedTheme);
     };
   });
@@ -294,7 +295,10 @@ export async function openSettings(state, onChanged) {
   backdrop.querySelectorAll('.rw-opt').forEach((card) => {
     card.onclick = () => {
       pickedWidth = normalizeReadWidth(card.dataset.rwId);
-      backdrop.querySelectorAll('.rw-opt').forEach((c) => c.classList.toggle('on', c === card));
+      backdrop.querySelectorAll('.rw-opt').forEach((option) => {
+        option.classList.toggle('on', option === card);
+        option.setAttribute('aria-pressed', String(option === card));
+      });
       applyReadWidth(pickedWidth);
     };
   });
@@ -504,12 +508,13 @@ export async function openSettings(state, onChanged) {
       (parseInt(backdrop.querySelector('#cfgTeammateChance').value, 10) || 0) / 100;
     state.teammateAutonomous = backdrop.querySelector('#cfgTeammateAutonomous').checked;
 
-    // 外观已经在预览时应用过了，这里只需要记住「保存过」以跳过回滚
     state.uiTheme = c.uiTheme;
     state.readWidth = c.readWidth;
+    applyTheme(c.uiTheme);
+    applyReadWidth(c.readWidth);
     saved = true;
 
     onChanged?.();
-    close();
+    closeModal();
   };
 }

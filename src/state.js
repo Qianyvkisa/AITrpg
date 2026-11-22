@@ -59,7 +59,7 @@ export function createInitialState() {
     // 主题与阅读宽度：运行时镜像 config.json 的值，由 loadConfig() 填充。
     // 不进存档——换角色卡不该让界面配色跟着变。
     // 合法值见 src/ui/theme.js；这里给默认值只是为了让首次渲染有东西可用。
-    uiTheme: 'brass',
+    uiTheme: 'tentacle',
     readWidth: 'normal',
     // 侧栏折叠：纯运行时状态，不持久化。
     // 折叠是为了「这一会儿专心读叙事」，下次启动应该回到完整三栏。

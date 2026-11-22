@@ -1,12 +1,19 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="tentacle" data-read-width="normal">
 <head>
   <meta charset="UTF-8">
   <title>UI 布局验证</title>
+  <!-- 顺序必须和 src/index.html 一致：素材变量 → 主题变量 → 结构样式。
+       少 motif-art.css 的话 --art-* 全部未定义，母题层与噪点会渲染成空，
+       预览页看着「干净」，实际应用里却是有纹理的——两边就不一致了。 -->
+  <link rel="stylesheet" href="../../src/motif-art.css">
   <link rel="stylesheet" href="../../src/themes.css">
   <link rel="stylesheet" href="../../src/styles.css">
+  <link rel="stylesheet" href="../../src/tentacle.css">
   <style>
-    body { background: #0a0b0f; }
+    /* 底色交给 themes.css 的 --bg-deep，不要在这里写死 hex：
+       写死的话换主题时预览页背景不跟着变，截图核对会得出错误结论。 */
+    body { background: var(--bg-deep); }
     /* 预览页不加载字体文件，用系统衬线兜底，避免 404 干扰判断 */
     :root { --font-serif: "Songti SC", "SimSun", serif; }
   </style>

@@ -1,0 +1,401 @@
+/* 触手 · 深海遗迹 */
+[data-theme="tentacle"] { --tentacle-icons: url('assets/tentacle/icons.webp'); }
+
+/* 图标共用 8 × 2 的贴图，位置按每格占整个贴图的比例计算。 */
+[data-theme="tentacle"] [data-art="eye"]    { --art-x: 28.5714%; }
+[data-theme="tentacle"] [data-art="person"] { --art-x: 57.1429%; }
+[data-theme="tentacle"] [data-art="save"]   { --art-x: 71.4286%; }
+[data-theme="tentacle"] [data-art="book"]   { --art-x: 85.7143%; }
+[data-theme="tentacle"] [data-art="gear"]   { --art-x: 100%; }
+[data-theme="tentacle"] [data-art="die"]    { --art-x: 0%; --art-y: 100%; }
+[data-theme="tentacle"] [data-art="skull"]  { --art-x: 14.2857%; --art-y: 100%; }
+[data-theme="tentacle"] [data-art="lamp"]   { --art-x: 28.5714%; --art-y: 100%; }
+[data-theme="tentacle"] [data-art="search"] { --art-x: 42.8571%; --art-y: 100%; }
+[data-theme="tentacle"] [data-art="wave"]   { --art-x: 85.7143%; --art-y: 100%; }
+
+[data-theme="tentacle"] :is(.menu-mini[data-art], .panel-head h2[data-art], .scene-label[data-art])::before,
+[data-theme="tentacle"] .menu-btn[data-art] .mb-mark {
+  content: '';
+  position: static;
+  flex: 0 0 auto;
+  display: block;
+  width: var(--art-size, 20px);
+  height: var(--art-size, 20px);
+  margin: 0;
+  transform: none;
+  background: var(--tentacle-icons) var(--art-x, 0%) var(--art-y, 0%) / 800% 200% no-repeat;
+  opacity: 1;
+  image-rendering: pixelated;
+}
+
+/* 开始屏 */
+[data-theme="tentacle"] .start-screen {
+  display: grid;
+  place-items: center start;
+  overflow: auto;
+  background-color: var(--bg-deep);
+  background-image:
+    linear-gradient(90deg, #100c16 2%, #100c16f2 22%, #100c1680 45%, #100c160c 70%),
+    linear-gradient(0deg, #100c168c, transparent 27%),
+    url('assets/tentacle/home.webp');
+  background-position: center, center, right center;
+  background-size: cover;
+  animation: none;
+}
+[data-theme="tentacle"] .start-atmo { display: none; }
+[data-theme="tentacle"] .start-inner {
+  display: flex;
+  width: min(490px, calc(100% - 84px));
+  align-items: flex-start;
+  gap: 24px;
+  margin-left: clamp(44px, 7.4vw, 160px);
+  padding-block: 28px;
+}
+[data-theme="tentacle"] .start-brand {
+  align-items: flex-start;
+  gap: 8px;
+  text-align: left;
+}
+[data-theme="tentacle"] .start-sigil {
+  width: 72px;
+  height: 67px;
+  margin-bottom: 6px;
+  background: url('assets/tentacle/emblem.webp') center / contain no-repeat;
+  image-rendering: pixelated;
+}
+[data-theme="tentacle"] :is(.sigil-shape, .sigil-glyph, .start-rule) { display: none; }
+[data-theme="tentacle"] .start-brand h1 {
+  color: #f8e4c7;
+  font-size: clamp(42px, 4.6vw, 68px);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: .075em;
+  text-indent: 0;
+  text-shadow: 2px 3px #08050c;
+}
+[data-theme="tentacle"] .start-sub {
+  color: var(--accent);
+  font-size: 12px;
+  letter-spacing: .17em;
+}
+[data-theme="tentacle"] .start-menu { max-width: 410px; gap: 10px; }
+[data-theme="tentacle"] .start-progress {
+  padding: 9px 12px;
+  border-color: var(--border);
+  background: var(--bg-bar);
+}
+[data-theme="tentacle"] .start-progress .sp-dot { animation: none; }
+[data-theme="tentacle"] .menu-btn {
+  grid-template-columns: 40px minmax(0, 1fr) 32px;
+  grid-template-rows: auto auto;
+  grid-auto-flow: column;
+  align-content: center;
+  min-height: 59px;
+  padding: 8px 10px;
+  border-color: var(--border-strong);
+  background: var(--bg-panel);
+  text-align: left;
+  box-shadow: 0 3px #08050c;
+}
+[data-theme="tentacle"] .menu-btn .mb-mark {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  align-self: center;
+  justify-self: center;
+  --art-size: 24px;
+}
+[data-theme="tentacle"] .menu-btn .mb-label {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: .08em;
+  text-indent: 0;
+}
+[data-theme="tentacle"] .menu-btn .mb-desc {
+  position: relative;
+  color: var(--ink-dim);
+  font-size: 12px;
+  letter-spacing: 0;
+}
+[data-theme="tentacle"] .menu-btn .mb-arrow {
+  position: relative;
+  padding: 0;
+  text-align: center;
+  opacity: .72;
+  transform: none;
+}
+[data-theme="tentacle"] .menu-btn:is(:hover, :focus-visible) .mb-arrow { opacity: 1; transform: translateX(3px); }
+[data-theme="tentacle"] .menu-btn.primary {
+  --button-state: 0%;
+  min-height: 80px;
+  grid-template-columns: 26% minmax(0, 1fr) 32px;
+  padding-inline: 6px 14px;
+  border: 0;
+  background: var(--bg-panel) url('assets/tentacle/buttons.webp') center var(--button-state) / 100% 300% no-repeat;
+  image-rendering: pixelated;
+}
+[data-theme="tentacle"] .menu-btn.primary .mb-mark { display: none; }
+[data-theme="tentacle"] .menu-btn.primary::before { content: none; }
+[data-theme="tentacle"] .menu-btn.primary .mb-label { color: #ffe0a6; font-size: 19px; }
+[data-theme="tentacle"] .menu-btn.primary:is(:hover, :focus-visible, .is-hover-preview) { --button-state: 50%; }
+[data-theme="tentacle"] .menu-btn.primary:active { --button-state: 100%; }
+[data-theme="tentacle"] .menu-btn.danger { border-color: #7d4548; background: var(--danger-bg); }
+[data-theme="tentacle"] .menu-btn.danger .mb-label { color: var(--danger-ink); }
+[data-theme="tentacle"] .menu-divider { display: none; }
+[data-theme="tentacle"] .menu-mini-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  padding-top: 8px;
+}
+[data-theme="tentacle"] .menu-mini {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 65px;
+  padding: 7px 2px;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  white-space: nowrap;
+  letter-spacing: 0;
+  background: var(--bg-panel);
+  border-color: var(--border);
+}
+[data-theme="tentacle"] .menu-mini::after { content: none; }
+[data-theme="tentacle"] .start-foot {
+  width: min(410px, 100%);
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  padding-block: 10px 0;
+  border-top: 1px solid var(--border);
+  gap: 6px 10px;
+  font-size: 11px;
+}
+[data-theme="tentacle"] .start-note { color: var(--ink-dim); }
+
+/* 跑团桌面 */
+[data-theme="tentacle"] body::before { content: none; }
+[data-theme="tentacle"] .topbar {
+  height: 60px;
+  padding-inline: clamp(14px, 2.1vw, 32px);
+  background: var(--bg-bar);
+  border-bottom-color: var(--border-strong);
+}
+[data-theme="tentacle"] .topbar::after { content: none; }
+[data-theme="tentacle"] .brand { align-items: center; min-width: 0; white-space: nowrap; }
+[data-theme="tentacle"] .brand .sigil {
+  flex: 0 0 auto;
+  width: 31px;
+  height: 29px;
+  background: url('assets/tentacle/emblem.webp') center / contain no-repeat;
+  image-rendering: pixelated;
+}
+[data-theme="tentacle"] .brand .sigil::before { content: none; }
+[data-theme="tentacle"] .brand .title { font-size: 16px; font-weight: 700; letter-spacing: .08em; }
+[data-theme="tentacle"] .brand .subtitle { letter-spacing: .08em; }
+[data-theme="tentacle"] .top-actions { gap: 7px; }
+[data-theme="tentacle"] :is(.top-actions .btn, .composer-actions .btn, .rb-toolbar .btn) { min-height: 36px; }
+[data-theme="tentacle"] .top-actions .top-toggle { min-width: 36px; }
+[data-theme="tentacle"] .layout {
+  --left-rail: clamp(192px, 16vw, 250px);
+  --right-rail: clamp(206px, 18vw, 282px);
+  grid-template-columns: var(--left-rail) minmax(0, 1fr) var(--right-rail);
+  padding: 12px;
+  background: linear-gradient(#100c16e8, #100c16f0), url('assets/tentacle/masonry.webp') 0 0 / 320px 320px;
+}
+[data-theme="tentacle"] .layout.hide-left { grid-template-columns: 0 minmax(0, 1fr) var(--right-rail); }
+[data-theme="tentacle"] .layout.hide-right { grid-template-columns: var(--left-rail) minmax(0, 1fr) 0; }
+[data-theme="tentacle"] .layout.hide-left.hide-right { grid-template-columns: 0 minmax(0, 1fr) 0; }
+[data-theme="tentacle"] .panel {
+  min-width: 0;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  backdrop-filter: none;
+  box-shadow: 0 3px #08050c;
+}
+[data-theme="tentacle"] .layout > .left-panel { margin-right: 12px; }
+[data-theme="tentacle"] .layout > .right-panel { margin-left: 12px; }
+[data-theme="tentacle"] :is(.left-panel, .right-panel) { padding: 14px 12px; scrollbar-gutter: stable; }
+[data-theme="tentacle"] .panel-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  --art-size: 18px;
+}
+[data-theme="tentacle"] :is(.char-card, .teammate-card, .stat-block, .clue-item) { box-shadow: none; }
+[data-theme="tentacle"] .char-card { border-left: 2px solid var(--accent-soft); }
+[data-theme="tentacle"] .cc-name { font-size: 15px; }
+[data-theme="tentacle"] :is(.tm-role, .bar-num, .bar-row, .log-row, .skill-row, .empty-hint) { font-size: 12px; }
+[data-theme="tentacle"] .bar-fill { transition-duration: .18s; animation: none; }
+[data-theme="tentacle"] .attr-item span { color: var(--ink-dim); }
+[data-theme="tentacle"] .center-panel { background: var(--bg); }
+[data-theme="tentacle"] .scene-bar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 9px;
+  min-height: 72px;
+  padding: 12px clamp(14px, 2vw, 30px);
+  border-bottom-color: var(--border-strong);
+  background-color: var(--bg-bar);
+  background-image: linear-gradient(90deg, #17111e 6%, #17111e84 54%, #17111e28), url('assets/tentacle/ruins.webp');
+  background-repeat: no-repeat;
+  background-position: center, right 53%;
+  background-size: cover, auto 110%;
+}
+[data-theme="tentacle"] .scene-label {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  color: var(--ink-dim);
+  font-size: 11px;
+  letter-spacing: .14em;
+  --art-size: 17px;
+}
+[data-theme="tentacle"] .scene-name {
+  color: var(--ink-strong);
+  font-size: clamp(15px, 1.45vw, 21px);
+  font-weight: 700;
+  line-height: 1.35;
+  word-break: break-word;
+}
+[data-theme="tentacle"] .turn-counter { margin-left: 0; color: var(--accent); font-size: 12px; white-space: nowrap; }
+[data-theme="tentacle"] .token-meter { color: var(--ink-dim); }
+[data-theme="tentacle"] .token-meter.warn { color: var(--accent); }
+[data-theme="tentacle"] .token-meter.danger { color: var(--danger-ink); }
+[data-theme="tentacle"] .messages {
+  padding: 22px clamp(14px, 2vw, 30px) 14px;
+  gap: 16px;
+  scrollbar-gutter: stable;
+}
+[data-theme="tentacle"] .msg-role { font-size: 12px; letter-spacing: .08em; }
+[data-theme="tentacle"] .msg.keeper .bubble {
+  padding: 12px 16px;
+  border: 1px solid var(--border-soft);
+  border-left: 2px solid var(--accent-soft);
+  font-family: var(--font-sans);
+  line-height: 1.85;
+}
+[data-theme="tentacle"] .msg.keeper .msg-role { padding-left: 0; }
+[data-theme="tentacle"] .msg.user .bubble { background: #322235; border: 1px solid #634250; }
+[data-theme="tentacle"] :is(.msg.user, .msg.npc, .msg.teammate, .msg.teammate-action) .bubble { font-size: 15px; }
+[data-theme="tentacle"] .msg.roll .bubble { font-size: 13px; }
+[data-theme="tentacle"] .msg-group { gap: 9px; }
+[data-theme="tentacle"] .earlier-btn { top: 80px; }
+[data-theme="tentacle"] .scroll-bottom-btn { bottom: 126px; }
+
+/* 文本输入、弹窗和交互反馈 */
+.composer-hint { display: none; }
+[data-theme="tentacle"] .composer {
+  padding: 12px clamp(14px, 2vw, 30px) 14px;
+  gap: 9px;
+  border-top-color: var(--border-strong);
+  background: var(--bg-bar);
+}
+[data-theme="tentacle"] .composer textarea { min-height: 54px; font-size: 15px; }
+[data-theme="tentacle"] .composer-hint {
+  display: block;
+  flex: 1 1 auto;
+  align-self: center;
+  min-width: 130px;
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+[data-theme="tentacle"] .composer-hint kbd {
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font: inherit;
+  white-space: nowrap;
+}
+[data-theme="tentacle"] #btnSend {
+  min-width: 94px;
+  font-weight: 750;
+  color: #21141a;
+  background: #e7b66c;
+  border-color: #f1c47e;
+  box-shadow: inset 0 -3px #ae763e, 0 2px #08050c;
+}
+[data-theme="tentacle"] #btnSend:is(:hover, :focus-visible):not(:disabled) { background: var(--accent); }
+[data-theme="tentacle"] #btnSend:disabled { color: var(--ink-dim); background: var(--bg-raised); border-color: var(--border); box-shadow: none; }
+[data-theme="tentacle"] #btnAutoAdvance { animation: none; }
+[data-theme="tentacle"] #btnAutoAdvance.on { border-color: var(--accent); color: var(--accent); }
+[data-theme="tentacle"] .modal-backdrop {
+  backdrop-filter: none;
+  background: rgba(var(--bg-deep-rgb), .88);
+}
+[data-theme="tentacle"] .modal {
+  position: relative;
+  border-color: var(--border-strong);
+  background: var(--bg-panel);
+  backdrop-filter: none;
+}
+[data-theme="tentacle"] .modal::before {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  pointer-events: none;
+  border: 26px solid transparent;
+  border-image: url('assets/tentacle/frame.webp') 60 76 / 18px / 1px stretch;
+  opacity: .67;
+  image-rendering: pixelated;
+}
+[data-theme="tentacle"] :is(.modal-head, .modal-body, .modal-foot, .st-tabs) { padding-inline: 24px; }
+[data-theme="tentacle"] .modal-body { scrollbar-gutter: stable; }
+[data-theme="tentacle"] .modal-foot { padding-bottom: 17px; }
+[data-swatch-for="tentacle"] {
+  background: #211626 url('assets/tentacle/home.webp') 75% 50% / cover no-repeat;
+  image-rendering: pixelated;
+}
+[data-swatch-for="tentacle"]::before,
+[data-swatch-for="tentacle"]::after { display: none; }
+[data-theme="tentacle"] .rb-toolbar { background: var(--bg-bar); }
+[data-theme="tentacle"] :is(.btn, .menu-btn, .menu-mini, .icon-btn) {
+  transition: transform 120ms ease, border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+[data-theme="tentacle"] :is(.btn, .menu-btn, .menu-mini, .icon-btn):not(:disabled):is(:hover, :focus-visible) {
+  border-color: var(--accent-soft);
+}
+[data-theme="tentacle"] :is(.btn, .menu-btn, .menu-mini, .icon-btn):not(:disabled):active {
+  transform: translateY(2px);
+}
+[data-theme="tentacle"] :is(button, textarea, input, select, a):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1160px) {
+  [data-theme="tentacle"] .brand .subtitle { display: none; }
+}
+
+@media (max-width: 860px) {
+  [data-theme="tentacle"] .layout { --left-rail: 158px; --right-rail: 170px; padding: 8px; }
+  [data-theme="tentacle"] .layout > .left-panel { margin-right: 8px; }
+  [data-theme="tentacle"] .layout > .right-panel { margin-left: 8px; }
+  [data-theme="tentacle"] .topbar { height: auto; min-height: 56px; flex-wrap: wrap; gap: 8px; padding-block: 8px; }
+  [data-theme="tentacle"] .top-actions { flex-wrap: wrap; max-width: 100%; }
+  [data-theme="tentacle"] .composer-hint { flex: 1 0 100%; }
+  [data-theme="tentacle"] .start-inner { width: min(440px, calc(100% - 48px)); margin-left: 24px; }
+  [data-theme="tentacle"] .start-screen { background-position: center, center, 67% center; }
+}
+
+@media (max-height: 760px) {
+  [data-theme="tentacle"] .start-inner { gap: 17px; }
+  [data-theme="tentacle"] .start-sigil { width: 57px; height: 53px; margin-bottom: 2px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="tentacle"] :is(.btn, .menu-btn, .menu-mini, .icon-btn, .mb-arrow, .bar-fill, .msg.enter, .modal-backdrop, .modal),
+  [data-theme="tentacle"] .cursor-blink::after {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}

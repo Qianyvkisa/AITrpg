@@ -1,514 +1,273 @@
-/* ===========================================================================
-   美术风格主题
-   ===========================================================================
+/* 配色与字号。触手主题的界面编排在 tentacle.css。 */
 
-   为什么单独一个文件：
-   本项目原来的配色散落在 styles.css 里 179 处硬编码色值 + 47 处 rgba()，
-   想换一套风格等于把整个文件重写一遍。这里把「颜色 / 字体 / 圆角 / 质感」
-   全部收进 CSS 变量，每个主题只需覆盖变量，styles.css 只描述结构。
-
-   加载顺序：themes.css → styles.css
-   变量定义在前，使用在后，所以 styles.css 里可以直接 var() 引用。
-   （反过来不行：styles.css 先加载的话，里面的 var() 在计算时拿不到值，
-   会回退成空字符串，界面直接变成无色。）
-
-   四个主题全部是暗色系：
-   克苏鲁恐怖调性本身偏暗，而且项目里大量文字色是按深底调的浅色
-   （#d0ccc2 之类），做浅色主题等于把 179 处色值全部重算一遍。
-   变量层已经预留，将来真要加浅色主题，补一个 [data-theme="xxx"] 块即可。
-
-   ===========================================================================
-   母题层（motif）：让四套主题不只是「换色」
-   ===========================================================================
-   只换颜色的话，四套主题切换后结构完全一样，看着就是同一件东西刷了不同漆。
-   这里给每套主题配一个**克苏鲁向的图形母题**，靠 CSS mask 铺在背景上：
-
-     黄铜档案  缠绕触手   调查员档案柜里压着的禁忌拓片
-     深海幽蓝  水波气泡   R'lyeh 沉在海底，抬头是层层水纹
-     磷光终端  点阵网格   冷战终端机上的字符阵列
-     血月绯红  蛛网裂纹   被什么东西从内部撑裂的岩壁
-
-   为什么用 mask + background-color 而不是直接把彩色 SVG 塞进 background：
-   SVG 里的颜色是写死的，换主题时图案不跟色走，会出现「绿色主题配黄铜触手」。
-   改成 mask 之后 SVG 只需要画纯黑形状，颜色由 background-color: var(--accent)
-   提供，四套主题共用同一套铺贴逻辑，图案永远和强调色同调。
-
-   data URI 的两条硬约束（踩过）：
-     1) 不能含 }，否则 theme.test.mjs 的 varsInThemeBlock 会把块截断在图案中间
-     2) # 必须写成 %23；本文件的 SVG 全程用单引号、不写 # 和双引号，直接可用
-   =========================================================================== */
-
-/* ---------------------------------------------------------------------------
-   必需变量清单（新增主题必须全部定义，否则界面会局部失色）
-   tests/theme.test.mjs 会逐个断言，漏一个就测试失败。
-
-   底色  --bg-deep --bg-deep-rgb --bg --bg-panel --bg-raised --bg-hover --bg-bar
-         --bg-input --bg-selected --bg-keeper
-   边框  --border --border-soft --border-strong
-   文字  --ink --ink-dim --ink-faint --ink-strong --ink-num
-   强调  --accent --accent-soft --accent-rgb --edge-rgb
-   语义  --danger --danger-ink --ok-ink --san --hp --clue
-         --clue-bg --clue-ink --clue-accent
-         --danger-bg --accent-bg --edge-solid
-         --ok-rgb --danger-rgb --clue-rgb --san-rgb --hp-rgb --mp-rgb
-   质感  --radius-sm --radius-md --radius-lg --shadow-modal --shadow-pop
-         --scan-opacity
-   字体  --font-serif --font-sans --font-mono --reading-size
-   母题  --motif-mask --motif-size --motif-opacity --motif-anim --motif-dur
-         --sigil-clip --sigil-glyph --btn-mark --btn-bracket-open
-         --btn-bracket-close --glow-rgb
-   --------------------------------------------------------------------------- */
-
-/* ===========================================================================
-   1. 黄铜档案（默认）
-   陈旧黄铜 + 深墨底，衬线标题。这是项目原本的视觉基调，
-   作为基线主题，其余三套都以它为参照做差异化。
-
-   母题：缠绕触手。极细线条从四边伸进来，像档案柜深处压着的一张拓片。
-   形态语言：直角小圆角、左侧 2px 铜条、标题双下划线、四角折角。
-   =========================================================================== */
 :root,
-[data-theme="brass"] {
+[data-theme="pixel"] {
   color-scheme: dark;
 
-  /* 底色 */
-  --bg-deep: #0a0b0f;
-  --bg-deep-rgb: 13, 15, 20;
-  --bg: #0d0f14;
-  --bg-panel: #12151c;
-  --bg-raised: #171b24;
-  --bg-hover: #1d222d;
-  --bg-bar: #0b0d12;
-  --bg-input: #0e1117;
-  --bg-selected: #1a1710;
-  --bg-keeper: #12151c;
+  /* 底色：暗紫黑。纯黑会让像素块之间失去层次，加一点紫调才像老显示器 */
+  --bg-deep: #0a0812;
+  --bg-deep-rgb: 10, 8, 18;
+  --bg: #0e0b17;
+  --bg-rgb: 14, 11, 23;
+  --bg-panel: #13101d;
+  --bg-panel-rgb: 19, 16, 29;
+  --bg-raised: #1a1626;
+  --bg-hover: #221d31;
+  --bg-bar: #08060e;
+  --bg-input: #0c0a14;
+  --bg-selected: #241a10;
+  --bg-keeper: #13101d;
 
-  /* 边框 */
-  --border: #232936;
-  --border-soft: #1a1f29;
-  --border-strong: #2f3747;
+  /* 边框：像素风靠边框划分区域，所以边框色要看得见 */
+  --border: #2a2438;
+  --border-soft: #1e1930;
+  --border-strong: #3d3550;
 
-  /* 文字 */
-  --ink: #c9ccd6;
-  --ink-dim: #7f8697;
-  --ink-faint: #5f6778;
-  --ink-strong: #d0ccc2;
-  --ink-num: #b0b6c4;
+  /* 文字：主文字用暖白（冷白配琥珀金会显脏） */
+  --ink: #c8c0d8;
+  --ink-dim: #867d99;
+  --ink-faint: #6b627f;
+  --ink-strong: #f0e8d0;
+  --ink-num: #b0a6c4;
 
-  /* 强调（accent-rgb 是 accent 的纯数字三元组，供 rgba() 拼透明度用） */
-  --accent: #b8894a;
-  --accent-soft: #8a6534;
-  --accent-rgb: 184, 137, 74;
-  /* 白色叠加层的替代色：主题里若想用暖白/冷白描边，改这里即可 */
-  --edge-rgb: 255, 255, 255;
-  /* 辉光色：标题与主按钮的呼吸光，和 accent 分开是为了允许「暖字冷光」 */
-  --glow-rgb: 184, 137, 74;
+  /* 强调：琥珀金 + 血红副色。这两个色是 16-bit 恐怖游戏的标配组合 */
+  --accent: #e8b04a;
+  --accent-soft: #a87c2c;
+  --accent-rgb: 232, 176, 74;
+  --accent2: #d4553c;
+  --accent2-rgb: 212, 85, 60;
+  --edge-rgb: 240, 232, 208;
+  --glow-rgb: 232, 176, 74;
 
-  /* 语义色 */
-  --danger: #a83a3a;
-  --danger-ink: #c96a6a;
-  --ok-ink: #7fae7f;
-  --san: #6b7fb5;
-  --hp: #8a3d3d;
-  --mp: #8a743d;
-  --clue: #6a8f6a;
-  --clue-bg: #101710;
-  --clue-ink: #9dbb9d;
-  --clue-accent: #3d5a3d;
-  --danger-bg: #1a1313;
-  --accent-bg: #16130c;
-  --edge-solid: #ffffff;
-  --ok-rgb: 127, 174, 127;
-  --danger-rgb: 168, 58, 58;
-  --clue-rgb: 106, 143, 106;
-  --san-rgb: 107, 127, 181;
-  --hp-rgb: 138, 61, 61;
-  --mp-rgb: 138, 116, 61;
+  /* 语义色：像素风里血量/理智用高饱和度，低饱和度在那个色域里会糊成一片 */
+  --danger: #c4433c;
+  --danger-ink: #e87068;
+  --ok-ink: #8fc46a;
+  --san: #6b8fd4;
+  --hp: #c4433c;
+  --mp: #b08a3c;
+  --clue: #6aa86a;
+  --clue-bg: #101a10;
+  --clue-ink: #a8d4a8;
+  --clue-accent: #3d6b3d;
+  --danger-bg: #1e1012;
+  --accent-bg: #1a1408;
+  --edge-solid: #f0e8d0;
+  --ok-rgb: 143, 196, 106;
+  --danger-rgb: 196, 67, 60;
+  --clue-rgb: 106, 168, 106;
+  --san-rgb: 107, 143, 212;
+  --hp-rgb: 196, 67, 60;
+  --mp-rgb: 176, 138, 60;
 
-  /* 质感 */
-  --radius-sm: 3px;
-  --radius-md: 4px;
-  --radius-lg: 6px;
-  --shadow-modal: 0 24px 64px rgba(0, 0, 0, .6);
-  --shadow-pop: 0 8px 24px rgba(0, 0, 0, .45);
-  --scan-opacity: 0;
-
-  /* 字体 */
-  --font-serif: 'Georgia', 'Songti SC', 'SimSun', serif;
-  --font-sans: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
-  --font-mono: 'Consolas', 'Courier New', monospace;
-  --reading-size: 15px;
-
-  /* 母题：缠绕触手 */
-  --motif-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='560' height='560' viewBox='0 0 560 560'><g fill='none' stroke='black' stroke-linecap='round' stroke-linejoin='round'><g stroke-width='12' stroke-opacity='.5'><path d='M-20 60 C70 66 140 118 152 208 C162 288 108 330 116 404 C122 462 168 496 226 508'/><path d='M580 120 C494 128 430 182 424 268 C418 342 462 384 456 448'/><path d='M248 580 C246 500 300 452 300 386 C300 316 250 278 250 214'/></g><g stroke-width='3.4'><path d='M-20 60 C70 66 140 118 152 208 C162 288 108 330 116 404 C122 462 168 496 226 508'/><path d='M580 120 C494 128 430 182 424 268 C418 342 462 384 456 448'/><path d='M248 580 C246 500 300 452 300 386 C300 316 250 278 250 214'/></g></g><g fill='black'><circle cx='96' cy='104' r='9'/><circle cx='142' cy='166' r='11'/><circle cx='152' cy='248' r='8'/><circle cx='122' cy='330' r='12'/><circle cx='120' cy='420' r='9'/><circle cx='176' cy='486' r='10'/><circle cx='474' cy='176' r='10'/><circle cx='430' cy='248' r='8'/><circle cx='428' cy='326' r='11'/><circle cx='452' cy='404' r='9'/><circle cx='272' cy='506' r='9'/><circle cx='298' cy='436' r='11'/><circle cx='300' cy='352' r='8'/><circle cx='272' cy='272' r='10'/></g></svg>");
-  --motif-size: 560px 560px;
-  --motif-opacity: .09;
-  --motif-anim: motif-drift;
-  --motif-dur: 90s;
-
-  /* sigil 形状：菱形（档案火漆印） */
-  --sigil-clip: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
-  /* 菜单按钮左侧铜条宽度 */
-  --btn-mark: 2px;
-  /* 按钮两侧方括号：黄铜主题不用，留空 */
-  --btn-bracket-open: '';
-  --btn-bracket-close: '';
-  /* sigil 内符号：火漆印上的菱形刻痕 */
-  --sigil-glyph: '◈';
-}
-
-/* ===========================================================================
-   2. 深海幽蓝
-   冷青蓝底 + 青绿强调，圆角放大，标题去衬线（人文无衬线），
-   整体像一份现代潜水器操作界面。
-
-   母题：同心水波 + 上浮气泡。慢速上移，像镜头在深水里缓缓下沉。
-   形态语言：大圆角、无左侧竖条、内侧冷光、sigil 为圆。
-   =========================================================================== */
-[data-theme="abyss"] {
-  color-scheme: dark;
-
-  --bg-deep: #06090f;
-
-  --bg-deep-rgb: 10, 15, 22;
-  --bg: #0a0f16;
-  --bg-panel: #0e141d;
-  --bg-raised: #131b26;
-  --bg-hover: #18222f;
-  --bg-bar: #080d13;
-  --bg-input: #0b121a;
-  --bg-selected: #0d1a22;
-  --bg-keeper: #0d1520;
-
-  --border: #1d2b3a;
-  --border-soft: #14202b;
-  --border-strong: #2a4054;
-
-  --ink: #c2d0dc;
-  --ink-dim: #78909f;
-  --ink-faint: #566c7c;
-  --ink-strong: #cfe0ec;
-  --ink-num: #a3bccd;
-
-  --accent: #3fa8b8;
-  --accent-soft: #2b7280;
-  --accent-rgb: 63, 168, 184;
-  --edge-rgb: 190, 230, 240;
-  --glow-rgb: 90, 210, 230;
-
-  --danger: #a84a52;
-  --danger-ink: #d4838a;
-  --ok-ink: #62b08e;
-  --san: #5f8fd0;
-  --hp: #9a4550;
-  --mp: #5fb09a;
-  --clue: #4f9d8e;
-  --clue-bg: #08171a;
-  --clue-ink: #8fcfc8;
-  --clue-accent: #2d6b63;
-  --danger-bg: #1d1216;
-  --accent-bg: #0a1a1f;
-  --edge-solid: #eaf6fa;
-  --ok-rgb: 98, 176, 142;
-  --danger-rgb: 168, 74, 82;
-  --clue-rgb: 79, 157, 142;
-  --san-rgb: 95, 143, 208;
-  --hp-rgb: 154, 69, 80;
-  --mp-rgb: 95, 176, 154;
-
-  --radius-sm: 5px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --shadow-modal: 0 24px 64px rgba(0, 8, 16, .7);
-  --shadow-pop: 0 8px 24px rgba(0, 8, 16, .5);
-  --scan-opacity: 0;
-
-  /* Candara 是 Windows 自带的人文无衬线，比 Georgia 更「工程感」 */
-  --font-serif: 'Candara', 'Segoe UI', 'Microsoft YaHei', sans-serif;
-  --font-sans: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
-  --font-mono: 'Consolas', 'Courier New', monospace;
-  --reading-size: 15px;
-
-  /* 母题：同心水波 + 气泡 */
-  --motif-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'><g fill='none' stroke='black' stroke-width='.9'><circle cx='80' cy='80' r='16'/><circle cx='80' cy='80' r='33'/><circle cx='80' cy='80' r='50'/><circle cx='80' cy='80' r='66'/><circle cx='80' cy='80' r='78'/></g><g fill='black'><circle cx='22' cy='30' r='2.4'/><circle cx='128' cy='20' r='1.6'/><circle cx='44' cy='122' r='2'/><circle cx='138' cy='104' r='1.3'/><circle cx='96' cy='46' r='1.5'/></g></svg>");
-  --motif-size: 160px 160px;
-  --motif-opacity: .055;
-  --motif-anim: motif-rise;
-  --motif-dur: 46s;
-
-  /* sigil 形状：圆（潜水器舷窗） */
-  --sigil-clip: circle(50% at 50% 50%);
-  /* 深海主题不用竖条，改用整圈冷光 */
-  --btn-mark: 0px;
-  --btn-bracket-open: '';
-  --btn-bracket-close: '';
-  /* sigil 内符号：水纹 */
-  --sigil-glyph: '≈';
-}
-
-/* ===========================================================================
-   3. 磷光终端
-   近纯黑 + 单色磷光绿，全等宽字体，零圆角，叠一层扫描线。
-   刻意做得像一台老式 CRT：这一套不是「好看」，是「氛围」。
-
-   母题：点阵字符网格。极密（14px）铺满，像荧光屏的像素点阵。
-   形态语言：零圆角、等宽、按钮两侧方括号、sigil 为方。
-   =========================================================================== */
-[data-theme="phosphor"] {
-  color-scheme: dark;
-
-  --bg-deep: #040604;
-
-  --bg-deep-rgb: 6, 9, 6;
-  --bg: #060906;
-  --bg-panel: #0a0e0a;
-  --bg-raised: #0d130d;
-  --bg-hover: #111a11;
-  --bg-bar: #050805;
-  --bg-input: #080c08;
-  --bg-selected: #0d1a0d;
-  --bg-keeper: #080d08;
-
-  --border: #1c2a1c;
-  --border-soft: #131d13;
-  --border-strong: #2a3d2a;
-
-  --ink: #b8d4b8;
-  --ink-dim: #6f8a6f;
-  --ink-faint: #4f664f;
-  --ink-strong: #d0e8d0;
-  --ink-num: #9dbb9d;
-
-  --accent: #4fd47f;
-  --accent-soft: #2f8f52;
-  --accent-rgb: 79, 212, 127;
-  --edge-rgb: 200, 255, 200;
-  --glow-rgb: 79, 255, 140;
-
-  --danger: #c05050;
-  --danger-ink: #e08080;
-  --ok-ink: #4fd47f;
-  /* 磷光是单色终端主题：HP / SAN / MP 不用不同色相区分，
-     改用同一绿色的三档亮度（满 / 中 / 暗）来区分。
-     彩色条在这套主题里会像贴纸一样突兀——单色屏不可能显示红蓝。
-     danger 保留红色：它只在「危险」语义下出现，是刻意的例外。 */
-  --san: #2f8f52;
-  --hp: #4fd47f;
-  --mp: #1a5e36;
-  --clue: #4fd47f;
-  --clue-bg: #07140a;
-  --clue-ink: #8fe0a8;
-  --clue-accent: #2f7a48;
-  --danger-bg: #140a0a;
-  --accent-bg: #08150c;
-  --edge-solid: #d8ffd8;
-  --ok-rgb: 79, 212, 127;
-  --danger-rgb: 192, 80, 80;
-  --clue-rgb: 79, 212, 127;
-  --san-rgb: 47, 143, 82;
-  --hp-rgb: 79, 212, 127;
-  --mp-rgb: 26, 94, 54;
-
+  /* 质感：全部零圆角。--radius-xs 也必须是 0，否则 2px 的小元素会圆掉 */
+  --radius-xs: 0px;
   --radius-sm: 0px;
-  --radius-md: 1px;
-  --radius-lg: 2px;
-  --shadow-modal: 0 0 0 1px rgba(79, 212, 127, .25), 0 20px 60px rgba(0, 0, 0, .85);
-  --shadow-pop: 0 4px 18px rgba(0, 0, 0, .7);
-  /* 扫描线强度：唯一启用扫描线的主题 */
-  --scan-opacity: .055;
-
-  --font-serif: 'Consolas', 'Courier New', monospace;
-  --font-sans: 'Consolas', 'Courier New', monospace;
-  --font-mono: 'Consolas', 'Courier New', monospace;
-  /* 等宽字体 x-height 偏大，正文字号降 1px 才不会显得拥挤 */
-  --reading-size: 14px;
-
-  /* 母题：点阵字符网格（很密，铺出来像荧光屏像素） */
-  --motif-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'><g fill='black'><circle cx='2' cy='2' r='.85'/><circle cx='9' cy='2' r='.85'/><circle cx='5.5' cy='5.5' r='.85'/><circle cx='12.5' cy='5.5' r='.85'/><circle cx='2' cy='9' r='.85'/><circle cx='9' cy='9' r='.85'/><circle cx='5.5' cy='12.5' r='.85'/><circle cx='12.5' cy='12.5' r='.85'/></g></svg>");
-  --motif-size: 14px 14px;
-  --motif-opacity: .07;
-  --motif-anim: motif-flicker;
-  --motif-dur: 7s;
-
-  /* sigil 形状：方（光标块） */
-  --sigil-clip: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);
-  --btn-mark: 3px;
-  /* 磷光主题的按钮带方括号，像终端菜单项 */
-  --btn-bracket-open: '[ ';
-  --btn-bracket-close: ' ]';
-  /* sigil 内符号：终端光标 */
-  --sigil-glyph: '▮';
-}
-
-/* ===========================================================================
-   4. 血月绯红
-   暗红紫底 + 陶土红金强调，圆角最大，衬线加重。
-   暖调里带一点紫，像月光下的旧血渍。
-
-   母题：蛛网裂纹。从中心向外炸开的细裂纹，缓慢呼吸。
-   形态语言：四角不同半径的圆角（不规则）、4px 粗竖条、sigil 为六边形。
-   =========================================================================== */
-[data-theme="blood"] {
-  color-scheme: dark;
-
-  --bg-deep: #0c0708;
-
-  --bg-deep-rgb: 16, 10, 12;
-  --bg: #100a0c;
-  --bg-panel: #150e11;
-  --bg-raised: #1b1216;
-  --bg-hover: #22161b;
-  --bg-bar: #0b0709;
-  --bg-input: #0f090b;
-  --bg-selected: #1d1013;
-  --bg-keeper: #120b0e;
-
-  --border: #2e1c22;
-  --border-soft: #21141a;
-  --border-strong: #432a33;
-
-  --ink: #d8c8cc;
-  --ink-dim: #94737c;
-  --ink-faint: #6d5560;
-  --ink-strong: #ecd8dc;
-  --ink-num: #c2a8b0;
-
-  --accent: #c47a5a;
-  --accent-soft: #8a4a3a;
-  --accent-rgb: 196, 122, 90;
-  --edge-rgb: 255, 220, 220;
-  --glow-rgb: 255, 90, 90;
-
-  --danger: #b03a3a;
-  --danger-ink: #e08080;
-  --ok-ink: #9aae7a;
-  --san: #7a6fb5;
-  --hp: #b03a3a;
-  --mp: #8a5a8c;
-  --clue: #9a8a5a;
-  --clue-bg: #17110a;
-  --clue-ink: #d0be8a;
-  --clue-accent: #6b5a2a;
-  --danger-bg: #1e0d11;
-  --accent-bg: #1b1010;
-  --edge-solid: #ffe8e8;
-  --ok-rgb: 154, 174, 122;
-  --danger-rgb: 176, 58, 58;
-  --clue-rgb: 154, 138, 90;
-  --san-rgb: 122, 111, 181;
-  --hp-rgb: 176, 58, 58;
-  --mp-rgb: 138, 90, 140;
-
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --shadow-modal: 0 24px 64px rgba(20, 0, 4, .72);
-  --shadow-pop: 0 8px 24px rgba(20, 0, 4, .5);
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  /* 像素风没有模糊阴影，用硬边阶梯代替：2px 纯色描边，边缘锐利 */
+  --shadow-modal: 0 0 0 2px var(--border-strong), 0 8px 0 0 rgba(var(--shadow-rgb), .55);
+  --shadow-pop: 0 0 0 2px var(--border), 0 4px 0 0 rgba(var(--shadow-rgb), .45);
+  --shadow-rgb: 0, 0, 0;
   --scan-opacity: 0;
 
-  --font-serif: 'Georgia', 'Songti SC', 'SimSun', serif;
-  --font-sans: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
-  --font-mono: 'Consolas', 'Courier New', monospace;
+  /* 材质：像素风不透明、不模糊，但保留一点颗粒做"写实" */
+  --border-w: 2px;
+  --hard-edge: 0 0 0 2px var(--border);
+  --panel-alpha: 1;
+  --panel-blur: 0px;
+  --noise-opacity: .05;
+  --sheen-rgb: 232, 176, 74;
+  --sheen-opacity: .06;
+
+  /* 字体：SimSun 是 Windows 上唯一自带点阵感的中文字体，12~15px 下
+     笔画会出现明显的阶梯状锯齿——这正好是我们要的"像素中文字"。 */
+  --font-serif: 'MS Gothic', 'SimSun', monospace;
+  --font-sans: 'SimSun', 'MS Gothic', monospace;
+  --font-mono: 'Consolas', 'MS Gothic', monospace;
+  /* 宋体 x-height 小，14px 会显得虚，抬到 15px */
   --reading-size: 15px;
 
-  /* 母题：蛛网裂纹 */
-  --motif-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='420' height='420' viewBox='0 0 420 420'><g fill='none' stroke='black' stroke-width='1.1' stroke-linecap='round' stroke-linejoin='round'><path d='M210 210 L176 118 L188 54 L172 -6'/><path d='M210 210 L300 172 L362 184 L422 158'/><path d='M210 210 L288 288 L296 356 L318 420'/><path d='M210 210 L118 262 L52 250 L-8 268'/><path d='M210 210 L200 306 L226 360'/><path d='M176 118 L128 96 M300 172 L330 118 M288 288 L232 330 M118 262 L96 318'/></g></svg>");
-  --motif-size: 420px 420px;
-  --motif-opacity: .085;
-  --motif-anim: motif-pulse;
-  --motif-dur: 9s;
+  /* 母题：像素石纹。纹理可以重复（看不出规律），符号不行。
+     强度比另外三套低一档（.08 对比噪点类主题的 .05~.12）：
+     方块是实心高对比形状，同样的不透明度下视觉重量远大于噪点和细线，
+     实测 .14 时整屏方块会盖过文字，读起来像隔着一层砖墙。 */
+  --motif-mask: var(--art-stone);
+  --motif-size: var(--art-stone-size);
+  /* .08 → .055：
+     石纹是实心方块，属于高对比形状，在开始屏上会形成一片明显的「砖墙」，
+     抢掉标题的视线。降到 .055 后仍能看出像素颗粒的重复节奏，
+     但退回到背景层。
+     注意：游戏内 .layout 和 .center-panel 会各铺一层，叠加后比开始屏重，
+     所以这个值要按「叠加后」的观感来定，不能只看开始屏。 */
+  --motif-opacity: .055;
+  --motif-anim: motif-drift;
+  --motif-dur: 120s;
 
-  /* sigil 形状：六边形（血月封印） */
-  --sigil-clip: polygon(50% 0%, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
-  --btn-mark: 4px;
+  /* 彩色材质层：海底遗迹石头。
+     这一层叠在 --motif-mask 下面，提供材质固有色（青灰石身 + 水渍绿 + 藤壶米白）。
+     只靠上面那层单色蒙版的话，石头会变成"琥珀金的形状"，看不出是石头。
+
+     出好图后改成：
+       --art-stone-color: url("../assets/ui/pixel/tile-color.png");
+     现在留 none 是因为图片还没出，写了会触发 404 请求。
+     尺寸和不透明度在 motif-art.css 统一控制，不用在这里改。 */
+  --art-stone-color: none;
+
+  /* sigil 形状：方（像素块）。一个圆角都不能有 */
+  --sigil-clip: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);
+  --sigil-glyph: '▣';
+  /* 菜单按钮左侧标记：3px 实心块，像选中的像素行 */
+  --btn-mark: 3px;
   --btn-bracket-open: '';
   --btn-bracket-close: '';
-  /* sigil 内符号：星芒 */
-  --sigil-glyph: '✶';
 }
 
-/* ===========================================================================
-   阅读宽度（独立于主题）
-   超宽屏下叙事区如果跟着窗口一起拉长，一行会到 150 字以上，眼睛回行会串。
-   挂 data-read-width 而不是并进主题，因为「喜欢哪种视觉」和
-   「习惯多宽的阅读列」是两件互不相干的事。
-   =========================================================================== */
+[data-theme="tentacle"] {
+  color-scheme: dark;
+  --bg-deep: #100c16;
+  --bg-deep-rgb: 16, 12, 22;
+  --bg: #17121e;
+  --bg-rgb: 23, 18, 30;
+  --bg-panel: #1c1624;
+  --bg-panel-rgb: 28, 22, 36;
+  --bg-raised: #271e30;
+  --bg-hover: #312438;
+  --bg-bar: #17111e;
+  --bg-input: #130e19;
+  --bg-selected: #352435;
+  --bg-keeper: #201826;
+
+  --border: #4b3546;
+  --border-soft: #342535;
+  --border-strong: #795346;
+  --ink: #eadfda;
+  --ink-dim: #c8b6ba;
+  --ink-faint: #ac98a7;
+  --ink-strong: #f6e8d7;
+  --ink-num: #e0c9c5;
+
+  --accent: #f1c47e;
+  --accent-soft: #a7784b;
+  --accent-rgb: 241, 196, 126;
+  --accent2: #bf7360;
+  --accent2-rgb: 191, 115, 96;
+  --edge-rgb: 246, 232, 215;
+  --glow-rgb: 241, 196, 126;
+
+  --danger: #b95855;
+  --danger-ink: #f1a49b;
+  --ok-ink: #a9d0b4;
+  --san: #b2aadb;
+  --hp: #cb6c66;
+  --mp: #d6a367;
+  --clue: #a3c9b4;
+  --clue-bg: #192727;
+  --clue-ink: #d1e3d5;
+  --clue-accent: #628f80;
+  --danger-bg: #301a24;
+  --accent-bg: #34251e;
+  --edge-solid: #f6e8d7;
+  --ok-rgb: 169, 208, 180;
+  --danger-rgb: 185, 88, 85;
+  --clue-rgb: 163, 201, 180;
+  --san-rgb: 178, 170, 219;
+  --hp-rgb: 203, 108, 102;
+  --mp-rgb: 214, 163, 103;
+
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --shadow-modal: 0 5px 0 rgba(8, 5, 12, .85);
+  --shadow-pop: 0 3px 0 rgba(8, 5, 12, .75);
+  --shadow-rgb: 8, 5, 12;
+  --scan-opacity: 0;
+
+  --border-w: 1px;
+  --hard-edge: none;
+  --panel-alpha: 1;
+  --panel-blur: 0px;
+  --noise-opacity: 0;
+  --sheen-rgb: 241, 196, 126;
+  --sheen-opacity: 0;
+
+  --font-serif: 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-sans: 'Segoe UI', 'Microsoft YaHei UI', system-ui, sans-serif;
+  --font-mono: Consolas, 'Microsoft YaHei UI', monospace;
+  --reading-size: 16px;
+
+  --motif-mask: none;
+  --motif-size: auto;
+  --motif-opacity: 0;
+  --motif-anim: none;
+  --motif-dur: 0s;
+  --art-stone-color: none;
+  --sigil-clip: none;
+  --sigil-glyph: '◆';
+  --btn-mark: 2px;
+  --btn-bracket-open: '';
+  --btn-bracket-close: '';
+}
+
+/* 阅读宽度独立于主题和边栏。 */
 :root,
 [data-read-width="normal"] { --read-width: 880px; }
 [data-read-width="narrow"] { --read-width: 720px; }
 [data-read-width="wide"]   { --read-width: 1080px; }
 
-/* ===========================================================================
-   质感层：扫描线
-   只有 phosphor 打开（--scan-opacity: .055），其余主题该值为 0，
-   也就是这一层完全不出现——不用额外写主题判断。
-   =========================================================================== */
-body::after {
+/* 备份主题的原有纹理只在选中像素写实时绘制。 */
+html[data-theme="pixel"]::after {
   content: '';
   position: fixed;
   inset: 0;
-  z-index: 2;
   pointer-events: none;
-  opacity: var(--scan-opacity, 0);
-  background: repeating-linear-gradient(
-    180deg,
-    rgba(var(--edge-rgb), .5) 0px,
-    rgba(var(--edge-rgb), .5) 1px,
-    transparent 1px,
-    transparent 3px
-  );
-  /* 扫描线是装饰，别让它参与合成层之外的任何事 */
-  will-change: opacity;
+  z-index: 9999;
+  background-image: var(--art-noise);
+  background-size: var(--art-noise-size);
+  opacity: var(--noise-opacity);
+  mix-blend-mode: overlay;
 }
 
-/* 用户开了「减少动态效果」时，扫描线这种高频条纹也一并去掉：
-   静态条纹虽然不动，但对光敏感的用户同样会不适。 */
-@media (prefers-reduced-motion: reduce) {
-  body::after { display: none; }
+[data-theme="pixel"] #app::before {
+  content: '';
+  position: fixed;
+  inset: -10%;
+  pointer-events: none;
+  opacity: var(--sheen-opacity);
+  background:
+    radial-gradient(ellipse 55% 45% at 22% 18%, rgba(var(--sheen-rgb), .9), transparent 70%),
+    radial-gradient(ellipse 50% 40% at 78% 82%, rgba(var(--accent2-rgb), .7), transparent 70%);
 }
 
-/* ===========================================================================
-   母题动画
-   四套主题各自的背景图案运动方式。全部做成极慢/极轻微：
-   这是背景氛围，不是屏保——一秒钟内能看出在动就太吵了。
+[data-theme="pixel"] #app::after {
+  content: '';
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: min(78vmin, 620px);
+  height: min(78vmin, 620px);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 9998;
+  background-color: var(--accent);
+  opacity: .09;
+  mix-blend-mode: soft-light;
+  mask: var(--art-emblem) center / contain no-repeat;
+}
 
-   ⚠ 关键帧里不能写 opacity：
-   元素本身的 opacity 由 --motif-opacity 控制（各主题不同）。
-   一旦 @keyframes 里出现 opacity，动画期间会**完全接管**这个属性，
-   关键帧之间的值会插值到 0~1 区间，主题设定的 .038 这类小值被彻底盖掉，
-   结果就是「改了 --motif-opacity 完全没反应」（实际踩到过：
-   血月主题把 .06 调到 .038，截图一模一样）。
-   所以「明暗呼吸」改用 filter: opacity()，它是独立属性，不和 opacity 打架。
-   =========================================================================== */
+[data-theme="pixel"] .layout,
+[data-theme="pixel"] .center-panel {
+  background-image: var(--motif-mask), var(--art-stone-color);
+  background-size: var(--motif-size), var(--art-stone-color-size, 192px);
+}
+[data-theme="pixel"] .layout { background-color: var(--bg-deep); }
 
-/* 触手：缓慢斜向漂移，像水面下的暗流 */
 @keyframes motif-drift {
-  0%   { transform: translate3d(0, 0, 0) rotate(0deg); }
-  50%  { transform: translate3d(-18px, -12px, 0) rotate(.6deg); }
-  100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  50% { transform: translate3d(-18px, -12px, 0) rotate(.6deg); }
 }
 
-/* 水波：整体上移一个图案周期，循环起来无缝，读作「气泡在上升」 */
-@keyframes motif-rise {
-  0%   { transform: translate3d(0, 0, 0); }
-  100% { transform: translate3d(0, -160px, 0); }
-}
-
-/* 点阵：荧光屏的细微亮度抖动（用 filter，不碰 opacity） */
-@keyframes motif-flicker {
-  0%, 100% { filter: opacity(1); }
-  42%      { filter: opacity(.82); }
-  44%      { filter: opacity(1); }
-  70%      { filter: opacity(.9); }
-}
-
-/* 裂纹：极慢呼吸，配合轻微放大，像岩壁在往里收缩 */
-@keyframes motif-pulse {
-  0%, 100% { filter: opacity(1);   transform: scale(1); }
-  50%      { filter: opacity(.78); transform: scale(1.008); }
-}
-
-/* 减少动态效果：所有母题动画停掉，图案静止保留（它本身是装饰，不需要动） */
 @media (prefers-reduced-motion: reduce) {
   .start-atmo .atmo-motif,
   .start-atmo .atmo-ring {

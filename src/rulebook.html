@@ -1,13 +1,16 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="brass" data-read-width="normal">
+<html lang="zh-CN" data-theme="tentacle" data-read-width="normal">
 <head>
 <meta charset="utf-8">
 <!-- pdfjs 需要 worker（blob:）与 canvas 内联样式；cMap/字体都从本地 vendor 读，不连外网 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'; worker-src 'self' blob:; connect-src 'self' blob: data:">
 <title>规则书 · 克苏鲁的呼唤 第七版</title>
+<!-- 顺序同 index.html：素材变量 → 主题变量 → 结构样式 -->
+<link rel="stylesheet" href="motif-art.css">
 <link rel="stylesheet" href="themes.css">
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="tentacle.css">
 </head>
 <body class="rb-window">
 
