@@ -204,7 +204,11 @@
   --right-rail: clamp(206px, 18vw, 282px);
   grid-template-columns: var(--left-rail) minmax(0, 1fr) var(--right-rail);
   padding: 12px;
-  background: linear-gradient(#100c16e8, #100c16f0), url('assets/tentacle/masonry.webp') 0 0 / 320px 320px;
+  /* 砖纹铺在桌面底层，折叠侧栏或滚动记录时，砖缝仍保持对齐。 */
+  background:
+    linear-gradient(145deg, #1029374d, #160f2180 78%),
+    url('assets/tentacle/masonry.webp') 0 0 / 384px 384px repeat,
+    var(--bg-deep);
 }
 [data-theme="tentacle"] .layout.hide-left { grid-template-columns: 0 minmax(0, 1fr) var(--right-rail); }
 [data-theme="tentacle"] .layout.hide-right { grid-template-columns: var(--left-rail) minmax(0, 1fr) 0; }
@@ -212,7 +216,7 @@
 [data-theme="tentacle"] .panel {
   min-width: 0;
   border: 1px solid var(--border);
-  background: var(--bg-panel);
+  background: rgb(18 17 29 / .25);
   backdrop-filter: none;
   box-shadow: 0 3px #08050c;
 }
@@ -233,9 +237,13 @@
 [data-theme="tentacle"] .char-card { border-left: 2px solid var(--accent-soft); }
 [data-theme="tentacle"] .cc-name { font-size: 15px; }
 [data-theme="tentacle"] :is(.tm-role, .bar-num, .bar-row, .log-row, .skill-row, .empty-hint) { font-size: 12px; }
+[data-theme="tentacle"] .log-row { padding-inline: 5px; background: var(--bg-panel); }
+[data-theme="tentacle"] .log-row .t { color: var(--ink-faint); }
 [data-theme="tentacle"] .bar-fill { transition-duration: .18s; animation: none; }
 [data-theme="tentacle"] .attr-item span { color: var(--ink-dim); }
-[data-theme="tentacle"] .center-panel { background: var(--bg); }
+[data-theme="tentacle"] .center-panel {
+  background: linear-gradient(90deg, #15101c4d, #15101ca6 32%, #15101ca6 68%, #15101c4d);
+}
 [data-theme="tentacle"] .scene-bar {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
@@ -286,6 +294,7 @@
 [data-theme="tentacle"] .msg.user .bubble { background: #322235; border: 1px solid #634250; }
 [data-theme="tentacle"] :is(.msg.user, .msg.npc, .msg.teammate, .msg.teammate-action) .bubble { font-size: 15px; }
 [data-theme="tentacle"] .msg.roll .bubble { font-size: 13px; }
+[data-theme="tentacle"] :is(.msg.system, .msg.scene) .bubble { background: var(--bg-panel); }
 [data-theme="tentacle"] .msg-group { gap: 9px; }
 [data-theme="tentacle"] .earlier-btn { top: 80px; }
 [data-theme="tentacle"] .scroll-bottom-btn { bottom: 126px; }
