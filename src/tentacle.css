@@ -204,11 +204,8 @@
   --right-rail: clamp(206px, 18vw, 282px);
   grid-template-columns: var(--left-rail) minmax(0, 1fr) var(--right-rail);
   padding: 12px;
-  /* 砖纹铺在桌面底层，折叠侧栏或滚动记录时，砖缝仍保持对齐。 */
-  background:
-    linear-gradient(145deg, #1029374d, #160f2180 78%),
-    url('assets/tentacle/masonry.webp') 0 0 / 384px 384px repeat,
-    var(--bg-deep);
+  /* 宫墙固定在桌面底层，两侧浮雕和砖缝在折叠侧栏时仍对齐。 */
+  background: var(--bg-deep) url('assets/tentacle/palace-wall.webp') center 54% / cover no-repeat;
 }
 [data-theme="tentacle"] .layout.hide-left { grid-template-columns: 0 minmax(0, 1fr) var(--right-rail); }
 [data-theme="tentacle"] .layout.hide-right { grid-template-columns: var(--left-rail) minmax(0, 1fr) 0; }
@@ -216,7 +213,7 @@
 [data-theme="tentacle"] .panel {
   min-width: 0;
   border: 1px solid var(--border);
-  background: rgb(18 17 29 / .25);
+  background: rgb(16 12 22 / .12);
   backdrop-filter: none;
   box-shadow: 0 3px #08050c;
 }
@@ -242,7 +239,7 @@
 [data-theme="tentacle"] .bar-fill { transition-duration: .18s; animation: none; }
 [data-theme="tentacle"] .attr-item span { color: var(--ink-dim); }
 [data-theme="tentacle"] .center-panel {
-  background: linear-gradient(90deg, #15101c4d, #15101ca6 32%, #15101ca6 68%, #15101c4d);
+  background: linear-gradient(90deg, #100c161a, #100c1659 34%, #100c1659 66%, #100c161a);
 }
 [data-theme="tentacle"] .scene-bar {
   display: grid;
