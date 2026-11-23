@@ -11,68 +11,33 @@
 [data-theme="ritual"] [data-art="wave"]   { --art-x: 71.4286%; --art-y: 100%; }
 
 [data-theme="ritual"] .start-screen {
-  --gallery-edge: clamp(22px, 3vw, 62px);
-  --gallery-gap: clamp(16px, 1.55vw, 32px);
-  --menu-rail: clamp(350px, 35vw, 864px);
-  --gallery-left: calc(var(--gallery-edge) + var(--menu-rail) + var(--gallery-gap));
-  grid-template-columns: var(--menu-rail) minmax(0, 1fr);
-  grid-template-rows: minmax(min-content, 1fr);
-  place-items: stretch;
-  gap: var(--gallery-gap);
-  padding: var(--gallery-edge);
+  place-items: center start;
+  padding: clamp(22px, 4.8vh, 55px) clamp(22px, 4.6vw, 102px);
   overflow: auto;
   background:
-    linear-gradient(90deg, transparent 37%, rgba(var(--accent2-rgb), .08)),
-    var(--bg-deep);
+    linear-gradient(90deg, #110e0bd6, #110e0bc9 25%, #110e0bb3 34%, #110e0b38 52%, transparent 68%),
+    linear-gradient(0deg, #110e0ba6, transparent 25%),
+    var(--bg-deep) url('assets/ritual/home.webp') center 58% / cover no-repeat;
   animation: none;
 }
-[data-theme="ritual"] .start-screen::before,
 [data-theme="ritual"] .start-screen::after {
   content: '';
   position: absolute;
-  inset: var(--gallery-edge) var(--gallery-edge) var(--gallery-edge) var(--gallery-left);
+  inset: 0 0 18% 44%;
   pointer-events: none;
-}
-[data-theme="ritual"] .start-screen::before {
   background:
-    linear-gradient(0deg, #120e0a66, transparent 32%),
-    url('assets/ritual/home.webp') center 64% / cover no-repeat;
-  border: 1px solid var(--border-strong);
-  box-shadow: 0 0 0 5px var(--bg-deep), 0 0 0 6px var(--border-soft);
-}
-[data-theme="ritual"] .start-screen::after {
-  background:
-    radial-gradient(ellipse at 17% 21%, #f2be713b, transparent 28%),
-    radial-gradient(ellipse at 80% 22%, #efb66232, transparent 29%);
-  opacity: .55;
+    radial-gradient(ellipse at 40% 17%, #f2be712e, transparent 29%),
+    radial-gradient(ellipse at 73% 73%, #efb66230, transparent 28%);
+  opacity: .5;
 }
 [data-theme="ritual"] :is(.start-atmo, .sigil-shape, .sigil-glyph, .start-rule) { display: none; }
 [data-theme="ritual"] .start-inner {
-  display: grid;
-  grid-template: auto minmax(min-content, 1fr) auto / minmax(0, 1fr);
-  align-items: center;
-  width: 100%;
+  display: flex;
+  align-items: stretch;
+  width: min(100%, clamp(340px, 29.5vw, 640px));
   min-width: 0;
-  padding: clamp(16px, 2.4vw, 54px);
-  gap: clamp(13px, 2.8vh, 36px);
-  border: 1px solid var(--border-strong);
-  box-shadow: inset 0 0 0 4px var(--bg-deep), 0 0 0 5px var(--bg-deep), 0 0 0 6px var(--border-soft);
-  background: linear-gradient(151deg, #261c12, #17130e 54%, #1d1f15);
+  gap: clamp(15px, 2.4vh, 29px);
 }
-[data-theme="ritual"] .start-inner::before {
-  content: '';
-  position: absolute;
-  top: 17%;
-  left: 50%;
-  width: min(89%, 510px);
-  aspect-ratio: 1;
-  translate: -50% 0;
-  clip-path: circle(48%);
-  background: url('assets/ritual/emblem.webp') center / contain no-repeat;
-  opacity: .14;
-  pointer-events: none;
-}
-[data-theme="ritual"] .start-inner > * { position: relative; }
 [data-theme="ritual"] .start-brand {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -321,21 +286,10 @@
 
 @media (max-height: 760px) {
   [data-theme="ritual"] .start-sigil { width: 54px; }
-  [data-theme="ritual"] .start-inner { gap: 12px; padding-block: 17px; }
+  [data-theme="ritual"] .start-inner { gap: 12px; }
 }
 
 @media (max-width: 860px) {
-  [data-theme="ritual"] .start-screen {
-    grid-template-columns: minmax(0, 440px);
-    justify-content: center;
-  }
-  [data-theme="ritual"] .start-screen::before {
-    inset: 0;
-    background-image: linear-gradient(90deg, #110e0bf5, #110e0b60 69%), url('assets/ritual/home.webp');
-    background-position: center, 65% center;
-    border: 0;
-    box-shadow: none;
-  }
-  [data-theme="ritual"] .start-screen::after { display: none; }
+  [data-theme="ritual"] .start-screen { background-position: center, center, 32% 58%; }
   [data-theme="ritual"] .layout { --rail-left: 158px; --rail-right: 170px; padding: 8px; }
 }
