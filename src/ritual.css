@@ -119,10 +119,30 @@
   image-rendering: pixelated;
 }
 [data-theme="ritual"] .menu-btn.primary .mb-label { color: var(--ink-strong); font-size: clamp(20px, 1.38vw, 29px); }
-[data-theme="ritual"] .menu-btn.primary:is(:hover, :focus-visible, .is-hover-preview) { --plate-position: 50%; }
 [data-theme="ritual"] .menu-btn.primary:active { --plate-position: 100%; }
 [data-theme="ritual"] .menu-btn.primary :is(.mb-mark, .mb-arrow),
 [data-theme="ritual"] .menu-btn.primary::before { display: none; }
+[data-theme="ritual"] .menu-btn.primary::after {
+  content: '';
+  background: url('assets/ritual/hover-fire.webp') center top / 100% 200% no-repeat;
+  image-rendering: pixelated;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-theme="ritual"] .menu-btn.primary:not(:disabled):is(:hover, :focus-visible, .is-hover-preview)::after {
+    animation: ritual-flame-sweep 840ms ease-out, ritual-flame-flicker 280ms steps(1, end) 3;
+  }
+}
+@keyframes ritual-flame-sweep {
+  0% { clip-path: inset(0 100% 0 0); opacity: 0; }
+  15% { opacity: .9; }
+  68% { clip-path: inset(0); opacity: 1; }
+  100% { clip-path: inset(0); opacity: 0; }
+}
+@keyframes ritual-flame-flicker {
+  50%, 100% { background-position-y: bottom; }
+}
+
 [data-theme="ritual"] .menu-btn.danger .mb-label { color: var(--danger-ink); }
 [data-theme="ritual"] .menu-divider { margin-block: 4px; }
 [data-theme="ritual"] .menu-mini-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
@@ -212,15 +232,26 @@
 [data-theme="ritual"] .bar-fill.low { animation: none; }
 [data-theme="ritual"] .center-panel { background: rgb(27 23 16 / .88); }
 [data-theme="ritual"] .scene-bar {
+  position: relative;
+  isolation: isolate;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
   gap: 10px;
   min-height: 74px;
   padding-inline: clamp(14px, 2vw, 30px);
-  background:
-    linear-gradient(90deg, #211910 28%, #211910db 51%, #21191034),
-    var(--bg-bar) url('assets/ritual/altar.webp') right 50% / clamp(220px, 58%, 540px) auto no-repeat;
+  background: var(--bg-bar);
   border-bottom-color: var(--border-strong);
+}
+[data-theme="ritual"] .scene-bar::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 0 auto;
+  width: min(100%, clamp(220px, 58%, 540px));
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, var(--bg-bar), #201a12df 12%, #201a1252 56%, #201a126b),
+    url('assets/ritual/altar.webp') center / cover no-repeat;
 }
 [data-theme="ritual"] .scene-label {
   display: flex;

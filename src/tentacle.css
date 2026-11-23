@@ -124,14 +124,35 @@
   grid-template-columns: 26% minmax(0, 1fr) 32px;
   padding-inline: 6px 14px;
   border: 0;
+  box-shadow: 0 3px #08050c;
   background: var(--bg-panel) url('assets/tentacle/buttons.webp') center var(--button-state) / 100% 300% no-repeat;
   image-rendering: pixelated;
 }
 [data-theme="tentacle"] .menu-btn.primary .mb-mark { display: none; }
-[data-theme="tentacle"] .menu-btn.primary::before { content: none; }
 [data-theme="tentacle"] .menu-btn.primary .mb-label { color: #ffe0a6; font-size: 19px; }
-[data-theme="tentacle"] .menu-btn.primary:is(:hover, :focus-visible, .is-hover-preview) { --button-state: 50%; }
+[data-theme="tentacle"] .menu-btn.primary .mb-arrow { opacity: .72; transform: none; }
 [data-theme="tentacle"] .menu-btn.primary:active { --button-state: 100%; }
+[data-theme="tentacle"] .menu-btn.primary::before,
+[data-theme="tentacle"] .menu-btn.primary::after {
+  content: '';
+  background: url('assets/tentacle/hover-tendril.webp') center / 100% 100% no-repeat;
+  image-rendering: pixelated;
+}
+[data-theme="tentacle"] .menu-btn.primary::after { transform: rotate(180deg); }
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-theme="tentacle"] .menu-btn.primary:not(:disabled):is(:hover, :focus-visible, .is-hover-preview)::before,
+  [data-theme="tentacle"] .menu-btn.primary:not(:disabled):is(:hover, :focus-visible, .is-hover-preview)::after {
+    animation: tentacle-wrap 960ms cubic-bezier(.3, .6, .4, 1);
+  }
+}
+@keyframes tentacle-wrap {
+  0% { clip-path: inset(0 100% 0 0); opacity: 0; }
+  12% { opacity: .9; }
+  55%, 68% { clip-path: inset(0); opacity: 1; }
+  100% { clip-path: inset(0 100% 0 0); opacity: 0; }
+}
+
 [data-theme="tentacle"] .menu-btn.danger { border-color: #7d4548; background: var(--danger-bg); }
 [data-theme="tentacle"] .menu-btn.danger .mb-label { color: var(--danger-ink); }
 [data-theme="tentacle"] .menu-divider { display: none; }

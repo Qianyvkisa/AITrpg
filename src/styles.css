@@ -2227,6 +2227,25 @@ body::before {
   box-shadow: 0 0 0 1px rgba(var(--accent-rgb), .18), 0 8px 24px rgba(var(--shadow-rgb), .45);
 }
 
+:is([data-theme="tentacle"], [data-theme="ritual"]) .menu-btn.primary {
+  isolation: isolate;
+  transform: none;
+  transition: none;
+  box-shadow: none;
+}
+:is([data-theme="tentacle"], [data-theme="ritual"]) .menu-btn.primary :is(.mb-label, .mb-desc, .mb-arrow) {
+  position: relative;
+  z-index: 1;
+}
+:is([data-theme="tentacle"], [data-theme="ritual"]) .menu-btn.primary::before,
+:is([data-theme="tentacle"], [data-theme="ritual"]) .menu-btn.primary::after {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: none;
+  pointer-events: none;
+}
+
 .menu-btn.danger { border-color: var(--danger); }
 .menu-btn.danger .mb-mark { background: var(--danger); }
 .menu-btn.danger .mb-label { color: var(--danger-ink); }
