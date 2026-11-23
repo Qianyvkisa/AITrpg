@@ -210,6 +210,93 @@
   --btn-bracket-close: '';
 }
 
+[data-theme="ritual"] {
+  color-scheme: dark;
+  --bg-deep: #110e0b;
+  --bg-deep-rgb: 17, 14, 11;
+  --bg: #1b1710;
+  --bg-rgb: 27, 23, 16;
+  --bg-panel: #251e15;
+  --bg-panel-rgb: 37, 30, 21;
+  --bg-raised: #352b1c;
+  --bg-hover: #403321;
+  --bg-bar: #201a12;
+  --bg-input: #17130f;
+  --bg-selected: #352c20;
+  --bg-keeper: #281f16;
+
+  --border: #624c32;
+  --border-soft: #463727;
+  --border-strong: #9c7951;
+  --ink: #ede2ce;
+  --ink-dim: #d1bea2;
+  --ink-faint: #b9a389;
+  --ink-strong: #fff1d6;
+  --ink-num: #e4cda6;
+
+  --accent: #efc37a;
+  --accent-soft: #b28c5d;
+  --accent-rgb: 239, 195, 122;
+  --accent2: #79a38a;
+  --accent2-rgb: 121, 163, 138;
+  --edge-rgb: 255, 241, 214;
+  --glow-rgb: 239, 195, 122;
+
+  --danger: #b96052;
+  --danger-ink: #f3aa96;
+  --ok-ink: #acd5b8;
+  --san: #a9c4b5;
+  --hp: #cb7966;
+  --mp: #d2a765;
+  --clue: #a6d1b2;
+  --clue-bg: #202d25;
+  --clue-ink: #d8e8da;
+  --clue-accent: #6b9d83;
+  --danger-bg: #351f1a;
+  --accent-bg: #3c2d1b;
+  --edge-solid: #fff1d6;
+  --ok-rgb: 172, 213, 184;
+  --danger-rgb: 185, 96, 82;
+  --clue-rgb: 166, 209, 178;
+  --san-rgb: 169, 196, 181;
+  --hp-rgb: 203, 121, 102;
+  --mp-rgb: 210, 167, 101;
+
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --shadow-modal: 0 5px 0 rgba(11, 8, 5, .88);
+  --shadow-pop: 0 3px 0 rgba(11, 8, 5, .8);
+  --shadow-rgb: 11, 8, 5;
+  --scan-opacity: 0;
+
+  --border-w: 1px;
+  --hard-edge: none;
+  --panel-alpha: 1;
+  --panel-blur: 0px;
+  --noise-opacity: 0;
+  --sheen-rgb: 239, 195, 122;
+  --sheen-opacity: 0;
+
+  --font-serif: Georgia, 'Microsoft YaHei UI', system-ui, serif;
+  --font-sans: 'Segoe UI', 'Microsoft YaHei UI', system-ui, sans-serif;
+  --font-mono: Consolas, 'Microsoft YaHei UI', monospace;
+  --reading-size: 16px;
+
+  --motif-mask: none;
+  --motif-size: auto;
+  --motif-opacity: 0;
+  --motif-anim: none;
+  --motif-dur: 0s;
+  --art-stone-color: none;
+  --sigil-clip: none;
+  --sigil-glyph: '◆';
+  --btn-mark: 2px;
+  --btn-bracket-open: '';
+  --btn-bracket-close: '';
+}
+
 /* 阅读宽度独立于主题和边栏。 */
 :root,
 [data-read-width="normal"] { --read-width: 880px; }

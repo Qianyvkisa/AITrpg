@@ -11,7 +11,7 @@
 //      ?view=start    只测开始界面
 //      ?view=game     只测跑团界面
 //      ?view=settings 打开设置弹窗（可配 ?tab=theme 直达外观页）
-//      ?theme=pixel   指定主题（tentacle / pixel）
+//      ?theme=pixel   指定主题（tentacle / ritual / pixel）
 //      ?rw=wide       指定阅读宽度（narrow / normal / wide）
 //      ?collapse=left|right|both  验证侧栏折叠后的布局
 //      ?measure=1     把实测几何写进 DOM，供 --dump-dom 抓取核对

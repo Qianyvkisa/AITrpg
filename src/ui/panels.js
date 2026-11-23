@@ -16,6 +16,7 @@ const $ = (sel) => document.querySelector(sel);
 
 /** 每个面板上一次写入的 HTML，用来做脏检查 */
 const lastHtml = new Map();
+let sceneMotion;
 
 /**
  * 只有内容变了才写 DOM。
@@ -37,6 +38,7 @@ function setText(sel, text) {
   if (lastHtml.get(sel) === text) return;
   lastHtml.set(sel, text);
   el.textContent = text;
+  return el;
 }
 
 /** 状态条（HP / SAN / MP） */
@@ -52,7 +54,14 @@ export function barHtml(label, cur, max, cls) {
 }
 
 export function renderScene(state) {
-  setText('#sceneName', state.scenario.scene || '尚未开始');
+  const sceneTitle = setText('#sceneName', state.scenario.scene || '尚未开始');
+  if (sceneTitle?.animate && globalThis.matchMedia?.('(prefers-reduced-motion: no-preference)').matches) {
+    sceneMotion?.cancel();
+    sceneMotion = sceneTitle.animate(
+      [{ opacity: .48, transform: 'translateY(3px)' }, { opacity: 1, transform: 'none' }],
+      { duration: 220, easing: 'cubic-bezier(.2, .75, .3, 1)' }
+    );
+  }
   const turns = turnCount(state);
   setText('#turnCounter', turns ? `第 ${turns} 轮` : '');
 }

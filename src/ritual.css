@@ -1,0 +1,275 @@
+/* 仪式 · 烛火祭坛 */
+[data-theme="ritual"] { --ui-icon-atlas: url('assets/ritual/icons.webp'); }
+[data-theme="ritual"] [data-art="eye"]    { --art-x: 100%; --art-y: 100%; }
+[data-theme="ritual"] [data-art="person"] { --art-x: 28.5714%; --art-y: 100%; }
+[data-theme="ritual"] [data-art="save"]   { --art-x: 100%; }
+[data-theme="ritual"] [data-art="book"]   { --art-x: 57.1429%; }
+[data-theme="ritual"] [data-art="gear"]   { --art-x: 85.7143%; }
+[data-theme="ritual"] [data-art="die"]    { --art-x: 42.8571%; --art-y: 100%; }
+[data-theme="ritual"] [data-art="skull"]  { --art-x: 14.2857%; --art-y: 100%; }
+[data-theme="ritual"] [data-art="search"] { --art-x: 57.1429%; --art-y: 100%; }
+[data-theme="ritual"] [data-art="wave"]   { --art-x: 71.4286%; --art-y: 100%; }
+
+[data-theme="ritual"] .start-screen {
+  --gallery-edge: clamp(18px, 3.4vw, 62px);
+  --gallery-left: 39%;
+  place-items: center start;
+  overflow: auto;
+  background:
+    linear-gradient(90deg, transparent 37%, rgba(var(--accent2-rgb), .08)),
+    var(--bg-deep);
+  animation: none;
+}
+[data-theme="ritual"] .start-screen::before,
+[data-theme="ritual"] .start-screen::after {
+  content: '';
+  position: absolute;
+  inset: var(--gallery-edge) var(--gallery-edge) var(--gallery-edge) var(--gallery-left);
+  pointer-events: none;
+}
+[data-theme="ritual"] .start-screen::before {
+  background:
+    linear-gradient(0deg, #120e0a66, transparent 32%),
+    url('assets/ritual/home.webp') center 64% / cover no-repeat;
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 0 0 5px var(--bg-deep), 0 0 0 6px var(--border-soft);
+}
+[data-theme="ritual"] .start-screen::after {
+  background:
+    radial-gradient(ellipse at 17% 21%, #f2be713b, transparent 28%),
+    radial-gradient(ellipse at 80% 22%, #efb66232, transparent 29%);
+  opacity: .55;
+}
+[data-theme="ritual"] :is(.start-atmo, .sigil-shape, .sigil-glyph, .start-rule) { display: none; }
+[data-theme="ritual"] .start-inner {
+  display: flex;
+  align-items: stretch;
+  width: min(410px, 32vw);
+  margin-left: clamp(28px, 4.8vw, 88px);
+  padding-block: 28px;
+  gap: 19px;
+}
+[data-theme="ritual"] .start-brand { align-items: flex-start; text-align: left; }
+[data-theme="ritual"] :is(.start-sigil, .brand .sigil) {
+  background: url('assets/ritual/emblem.webp') center / contain no-repeat;
+  clip-path: circle(49%);
+  image-rendering: pixelated;
+}
+[data-theme="ritual"] .start-sigil { width: 84px; height: 84px; margin-bottom: 6px; }
+[data-theme="ritual"] .start-brand h1 {
+  color: var(--ink-strong);
+  font-family: var(--font-serif);
+  font-size: clamp(36px, 3.4vw, 53px);
+  font-weight: 800;
+  line-height: 1.13;
+  letter-spacing: .055em;
+  text-indent: 0;
+  word-break: keep-all;
+}
+[data-theme="ritual"] .start-sub { color: var(--accent); letter-spacing: .135em; font-size: 11px; }
+[data-theme="ritual"] .start-progress { background: var(--bg-panel); }
+[data-theme="ritual"] .start-progress .sp-dot { background: var(--accent2); animation: none; }
+[data-theme="ritual"] .start-menu { gap: 9px; }
+[data-theme="ritual"] .menu-btn {
+  grid-template-columns: 40px minmax(0, 1fr) 28px;
+  align-content: center;
+  min-height: 54px;
+  border-color: var(--border);
+  background: var(--bg-panel);
+  text-align: left;
+}
+[data-theme="ritual"] .menu-btn .mb-mark {
+  grid-area: 1 / 1 / 3 / 2;
+  align-self: center;
+  justify-self: center;
+}
+[data-theme="ritual"] .menu-btn .mb-label {
+  font-size: 16px;
+  line-height: 1.5;
+  font-weight: 700;
+  text-indent: 0;
+  letter-spacing: .08em;
+}
+[data-theme="ritual"] .menu-btn .mb-desc { font-size: 11px; letter-spacing: .025em; color: var(--ink-dim); }
+[data-theme="ritual"] .menu-btn .mb-arrow { padding: 0; text-align: center; }
+[data-theme="ritual"] .menu-btn:is(:hover, :focus-visible) .mb-arrow { opacity: 1; transform: translateX(2px); }
+[data-theme="ritual"] .menu-btn.primary {
+  --plate-position: 0%;
+  min-height: 91px;
+  border: 0;
+  grid-template-columns: 29% minmax(0, 1fr) 27px;
+  padding-inline-end: 7px;
+  background: var(--bg-deep) url('assets/ritual/buttons.webp') center var(--plate-position) / 100% 300% no-repeat;
+  image-rendering: pixelated;
+}
+[data-theme="ritual"] .menu-btn.primary .mb-label { color: var(--ink-strong); font-size: 20px; }
+[data-theme="ritual"] .menu-btn.primary:is(:hover, :focus-visible, .is-hover-preview) { --plate-position: 50%; }
+[data-theme="ritual"] .menu-btn.primary:active { --plate-position: 100%; }
+[data-theme="ritual"] .menu-btn.primary :is(.mb-mark, .mb-arrow),
+[data-theme="ritual"] .menu-btn.primary::before { display: none; }
+[data-theme="ritual"] .menu-btn.danger .mb-label { color: var(--danger-ink); }
+[data-theme="ritual"] .menu-divider { margin-block: 4px; }
+[data-theme="ritual"] .menu-mini-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+[data-theme="ritual"] .menu-mini {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 54px;
+  padding: 5px 2px;
+  color: var(--ink-dim);
+  background: var(--bg-panel);
+  font: 11px var(--font-sans);
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+[data-theme="ritual"] .menu-mini::after { content: none; }
+[data-theme="ritual"] .start-foot {
+  padding-top: 9px;
+  border-top: 1px solid var(--border-soft);
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 4px 9px;
+}
+
+/* 跑团桌面。祭坛图共用于底层和场景栏，小块卡片保留实色底。 */
+[data-theme="ritual"] body::before { content: none; }
+[data-theme="ritual"] .topbar { height: 59px; padding-inline: clamp(14px, 2.3vw, 34px); border-bottom-color: var(--border-strong); }
+[data-theme="ritual"] .topbar::after { content: none; }
+[data-theme="ritual"] .brand .sigil { flex: 0 0 auto; width: 35px; height: 35px; }
+[data-theme="ritual"] .brand .sigil::before { content: none; }
+[data-theme="ritual"] .brand .title { font-size: 16px; letter-spacing: .08em; font-weight: 700; white-space: nowrap; }
+[data-theme="ritual"] .top-actions { gap: 7px; }
+[data-theme="ritual"] :is(.top-actions .btn, .composer-actions .btn, .rb-toolbar .btn) { min-height: 36px; }
+[data-theme="ritual"] .top-actions .top-toggle { min-width: 34px; }
+[data-theme="ritual"] .layout {
+  --rail-left: clamp(182px, 16vw, 255px);
+  --rail-right: clamp(188px, 18vw, 268px);
+  grid-template-columns: var(--rail-left) minmax(0, 1fr) var(--rail-right);
+  padding: 12px;
+  background:
+    linear-gradient(0deg, #110e0bc9, #110e0b80),
+    var(--bg-deep) url('assets/ritual/altar.webp') center 55% / cover no-repeat;
+}
+[data-theme="ritual"] .layout.hide-left { grid-template-columns: 0 minmax(0, 1fr) var(--rail-right); }
+[data-theme="ritual"] .layout.hide-right { grid-template-columns: var(--rail-left) minmax(0, 1fr) 0; }
+[data-theme="ritual"] .layout.hide-left.hide-right { grid-template-columns: 0 minmax(0, 1fr) 0; }
+[data-theme="ritual"] .layout > .left-panel { margin-right: 10px; }
+[data-theme="ritual"] .layout > .right-panel { margin-left: 10px; }
+[data-theme="ritual"] .panel {
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  background: rgb(30 24 17 / .87);
+  backdrop-filter: none;
+}
+[data-theme="ritual"] :is(.left-panel, .right-panel) { padding: 13px 11px; scrollbar-gutter: stable; }
+[data-theme="ritual"] .panel-head { padding-bottom: 8px; border-bottom: 1px solid var(--border-soft); }
+[data-theme="ritual"] .panel-head h2 {
+  --art-size: 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .12em;
+}
+[data-theme="ritual"] .panel-head h2::after { content: none; }
+[data-theme="ritual"] :is(.tm-role, .skill-row, .log-row, .bar-row, .empty-hint) { font-size: 12px; }
+[data-theme="ritual"] .log-row .t { color: var(--ink-faint); }
+[data-theme="ritual"] .bar-fill.low { animation: none; }
+[data-theme="ritual"] .center-panel { background: rgb(27 23 16 / .88); }
+[data-theme="ritual"] .scene-bar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 10px;
+  min-height: 74px;
+  padding-inline: clamp(14px, 2vw, 30px);
+  background:
+    linear-gradient(90deg, #211910 28%, #211910db 51%, #21191034),
+    var(--bg-bar) url('assets/ritual/altar.webp') right 50% / clamp(220px, 58%, 540px) auto no-repeat;
+  border-bottom-color: var(--border-strong);
+}
+[data-theme="ritual"] .scene-label {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  color: var(--ink-dim);
+  --art-size: 15px;
+}
+[data-theme="ritual"] .scene-name {
+  color: var(--ink-strong);
+  font-size: clamp(16px, 1.55vw, 22px);
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+[data-theme="ritual"] .turn-counter { white-space: nowrap; color: var(--ink-strong); }
+[data-theme="ritual"] .messages { padding: 19px clamp(14px, 2vw, 30px) 14px; gap: 15px; scrollbar-gutter: stable; }
+[data-theme="ritual"] .msg-role { font-size: 11px; letter-spacing: .075em; }
+[data-theme="ritual"] .msg.keeper .bubble { border: 1px solid var(--border-soft); border-left: 2px solid var(--accent-soft); }
+[data-theme="ritual"] .msg.keeper .msg-role { padding-left: 0; }
+[data-theme="ritual"] .msg.user .bubble { background: var(--clue-bg); border-color: var(--clue-accent); }
+[data-theme="ritual"] :is(.msg.system, .msg.scene) .bubble { background: var(--bg-panel); }
+[data-theme="ritual"] .earlier-btn { top: 82px; }
+[data-theme="ritual"] .scroll-bottom-btn { bottom: 128px; }
+[data-theme="ritual"] .composer {
+  padding: 12px clamp(14px, 2vw, 30px) 13px;
+  border-top-color: var(--border-strong);
+}
+[data-theme="ritual"] .composer textarea { font-size: 15px; min-height: 52px; }
+[data-theme="ritual"] .composer-hint { display: block; flex: 1 0 auto; align-self: center; color: var(--ink-faint); font-size: 11px; }
+[data-theme="ritual"] .composer-hint kbd { padding: 1px 4px; border: 1px solid var(--border); color: var(--ink); font: inherit; }
+[data-theme="ritual"] #btnSend:not(:disabled) {
+  min-width: 88px;
+  color: var(--bg-deep);
+  background: var(--accent);
+  font-weight: 700;
+  box-shadow: inset 0 -3px var(--accent-soft);
+}
+[data-theme="ritual"] #btnAutoAdvance.on { animation: none; border-color: var(--clue-accent); color: var(--clue); }
+
+[data-theme="ritual"] .modal-backdrop { background: rgba(var(--bg-deep-rgb), .87); }
+[data-theme="ritual"] .modal { position: relative; border-color: var(--border-strong); backdrop-filter: none; }
+[data-theme="ritual"] .modal::before {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  pointer-events: none;
+  border: 22px solid transparent;
+  border-image: url('assets/ritual/frame.webp') 54 66 / 22px / 1px stretch;
+  opacity: .86;
+  image-rendering: pixelated;
+}
+[data-theme="ritual"] :is(.modal-head, .modal-body, .modal-foot, .st-tabs) { padding-inline: 25px; }
+[data-theme="ritual"] .modal-body { scrollbar-gutter: stable; }
+[data-theme="ritual"] .modal-foot { padding-bottom: 17px; }
+[data-swatch-for="ritual"] { background: #1b150e url('assets/ritual/emblem.webp') center / auto 94% no-repeat; image-rendering: pixelated; }
+[data-swatch-for="ritual"]::before, [data-swatch-for="ritual"]::after { display: none; }
+
+@media (max-width: 1160px) {
+  [data-theme="ritual"] .brand .subtitle { display: none; }
+  [data-theme="ritual"] .start-screen { --gallery-left: 41%; }
+  [data-theme="ritual"] .start-inner { width: min(385px, 34vw); }
+}
+
+@media (max-height: 760px) {
+  [data-theme="ritual"] .start-sigil { width: 60px; height: 60px; margin-bottom: 2px; }
+  [data-theme="ritual"] .start-inner { gap: 13px; padding-block: 18px; }
+  [data-theme="ritual"] .menu-btn.primary { min-height: 78px; }
+}
+
+@media (max-width: 860px) {
+  [data-theme="ritual"] .start-screen { --gallery-left: 0; --gallery-edge: 0; }
+  [data-theme="ritual"] .start-screen::before {
+    background-image: linear-gradient(90deg, #110e0bf5, #110e0b60 69%), url('assets/ritual/home.webp');
+    background-position: center, 65% center;
+    border: 0;
+    box-shadow: none;
+  }
+  [data-theme="ritual"] .start-screen::after { display: none; }
+  [data-theme="ritual"] .start-inner { width: min(360px, calc(100% - 48px)); margin-left: 24px; }
+  [data-theme="ritual"] .layout { --rail-left: 158px; --rail-right: 170px; padding: 8px; }
+}

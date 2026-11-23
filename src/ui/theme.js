@@ -8,6 +8,13 @@ export const THEMES = [
     swatch: ['#f1c47e', '#100c16', '#1c1624']
   },
   {
+    id: 'ritual',
+    name: '仪式 · 烛火祭坛',
+    motif: '黄铜与铜绿',
+    desc: '烛光祭坛、手刻符阵与铜绿描边。',
+    swatch: ['#efc37a', '#110e0b', '#251e15']
+  },
+  {
     id: 'pixel',
     name: '像素写实',
     motif: '经典备份',

@@ -26,6 +26,8 @@ const REQUIRED = [
   '/src/themes.css',
   '/src/motif-art.css',
   '/src/tentacle.css',
+  '/src/ritual.css',
+  '/src/rulebook.html',
   '/src/ui/theme.js',
   '/src/modals/settings.js',
   '/src/core/autoAdvance.js',
@@ -34,12 +36,13 @@ const REQUIRED = [
   '/preload.js'
 ];
 
-const themeCss = norm.has('/src/tentacle.css')
-  ? asar.extractFile(ASAR, 'src/tentacle.css').toString('utf8')
-  : '';
-for (const [, name] of themeCss.matchAll(/url\('assets\/tentacle\/([\w-]+\.webp)'\)/g)) {
-  const path = `/src/assets/tentacle/${name}`;
-  if (!REQUIRED.includes(path)) REQUIRED.push(path);
+for (const file of ['src/tentacle.css', 'src/ritual.css']) {
+  if (!norm.has('/' + file)) continue;
+  const themeCss = asar.extractFile(ASAR, file).toString('utf8');
+  for (const [, path] of themeCss.matchAll(/url\('(assets\/(?:tentacle|ritual)\/[\w-]+\.webp)'\)/g)) {
+    const entry = '/src/' + path;
+    if (!REQUIRED.includes(entry)) REQUIRED.push(entry);
+  }
 }
 
 let bad = 0;

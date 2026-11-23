@@ -1,5 +1,5 @@
 /* 触手 · 深海遗迹 */
-[data-theme="tentacle"] { --tentacle-icons: url('assets/tentacle/icons.webp'); }
+[data-theme="tentacle"] { --ui-icon-atlas: url('assets/tentacle/icons.webp'); }
 
 /* 图标共用 8 × 2 的贴图，位置按每格占整个贴图的比例计算。 */
 [data-theme="tentacle"] [data-art="eye"]    { --art-x: 28.5714%; }
@@ -13,21 +13,6 @@
 [data-theme="tentacle"] [data-art="search"] { --art-x: 42.8571%; --art-y: 100%; }
 [data-theme="tentacle"] [data-art="wave"]   { --art-x: 85.7143%; --art-y: 100%; }
 
-[data-theme="tentacle"] :is(.menu-mini[data-art], .panel-head h2[data-art], .scene-label[data-art])::before,
-[data-theme="tentacle"] .menu-btn[data-art] .mb-mark {
-  content: '';
-  position: static;
-  flex: 0 0 auto;
-  display: block;
-  width: var(--art-size, 20px);
-  height: var(--art-size, 20px);
-  margin: 0;
-  transform: none;
-  background: var(--tentacle-icons) var(--art-x, 0%) var(--art-y, 0%) / 800% 200% no-repeat;
-  opacity: 1;
-  image-rendering: pixelated;
-}
-
 /* 开始屏 */
 [data-theme="tentacle"] .start-screen {
   display: grid;
@@ -35,12 +20,20 @@
   overflow: auto;
   background-color: var(--bg-deep);
   background-image:
-    linear-gradient(90deg, #100c16 2%, #100c16f2 22%, #100c1680 45%, #100c160c 70%),
+    linear-gradient(90deg, #100c16ad 0%, #100c16d6 24%, #100c1666 45%, transparent 69%),
     linear-gradient(0deg, #100c168c, transparent 27%),
     url('assets/tentacle/home.webp');
-  background-position: center, center, right center;
+  background-position: center;
   background-size: cover;
   animation: none;
+}
+[data-theme="tentacle"] .start-screen::after {
+  content: '';
+  position: absolute;
+  inset: 0 12% 51% 30%;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 42% 0%, #eab7684d, transparent 68%);
+  opacity: .22;
 }
 [data-theme="tentacle"] .start-atmo { display: none; }
 [data-theme="tentacle"] .start-inner {
@@ -357,7 +350,7 @@
 [data-theme="tentacle"] .modal-body { scrollbar-gutter: stable; }
 [data-theme="tentacle"] .modal-foot { padding-bottom: 17px; }
 [data-swatch-for="tentacle"] {
-  background: #211626 url('assets/tentacle/home.webp') 75% 50% / cover no-repeat;
+  background: #211626 url('assets/tentacle/emblem.webp') center / auto 94% no-repeat;
   image-rendering: pixelated;
 }
 [data-swatch-for="tentacle"]::before,

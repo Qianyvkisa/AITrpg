@@ -588,7 +588,7 @@ body::before {
   to { opacity: 1; transform: none; }
 }
 
-.msg.enter { animation: fade-up .25s ease; }
+.msg.enter { animation: fade-up 190ms cubic-bezier(.2, .75, .3, 1); }
 
 /* 长局里连续滚动的性能开关：
    消息超过一定数量时，app.js 会给 #messages 加 .long-log 类，
@@ -893,9 +893,8 @@ body::before {
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 100;
   background: rgba(var(--bg-deep-rgb), .82);
-  backdrop-filter: blur(3px);
   display: grid; place-items: center;
-  animation: fade-in .15s ease;
+  animation: fade-in 160ms ease-out;
 }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
@@ -909,7 +908,7 @@ body::before {
   box-shadow: var(--shadow-modal);
   -webkit-backdrop-filter: blur(var(--panel-blur, 0px));
   backdrop-filter: blur(var(--panel-blur, 0px));
-  animation: modal-in .18s ease;
+  animation: modal-in 220ms cubic-bezier(.18, .76, .28, 1);
 }
 .modal.wide { width: min(760px, 94vw); }
 .modal.narrow { width: min(440px, 92vw); }
@@ -951,11 +950,12 @@ body::before {
 /* ---- 美术风格卡片 ---- */
 .theme-picker {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 9px;
 }
 .theme-opt {
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
   gap: 10px;
   text-align: left;
@@ -975,21 +975,22 @@ body::before {
   box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .25);
 }
 
-/* 母题缩略图：把该主题的背景图案按比例缩小画进卡片，
-   让「换风格」在设置面板里就能看出形状差异，而不只是三个色块。
-   图案来自 --motif-mask，颜色来自 --motif-swatch-accent（内联设成该主题的强调色）。
-   尺寸 62px：46px 时图案细节糊成一团，四套主题看起来几乎一样，
-   选风格这件事就失去了意义。 */
+/* 主题缩略图使用徽记或母题纹理。 */
 .theme-swatch {
   position: relative;
   flex: 0 0 auto;
-  width: 62px;
+  width: 100%;
   height: 62px;
   border-radius: var(--radius-sm);
   border: 1px solid rgba(var(--edge-rgb), .12);
   overflow: hidden;
   /* 底色用卡片自己声明的深底 */
   background: var(--motif-swatch-bg, var(--bg-deep));
+}
+@media (max-width: 650px) {
+  .theme-picker { grid-template-columns: minmax(0, 1fr); }
+  .theme-opt { flex-direction: row; }
+  .theme-swatch { width: 62px; }
 }
 /* 图案层 */
 .theme-swatch::before {
@@ -1099,7 +1100,7 @@ body::before {
 }
 .prompt-input::placeholder { color: var(--ink-faint); }
 @keyframes modal-in {
-  from { opacity: 0; transform: translateY(10px) scale(.99); }
+  from { opacity: .14; transform: translateY(8px) scale(.985); }
   to { opacity: 1; transform: none; }
 }
 
@@ -2166,6 +2167,47 @@ body::before {
 .menu-btn:hover .mb-label { color: var(--accent); }
 .menu-btn:active { transform: translateY(0); }
 
+/* 两套主题各提供一张 8 × 2 像素图标贴图。 */
+:is([data-theme="tentacle"], [data-theme="ritual"]) :is(.menu-mini[data-art], .panel-head h2[data-art], .scene-label[data-art])::before,
+:is([data-theme="tentacle"], [data-theme="ritual"]) .menu-btn[data-art] .mb-mark {
+  content: '';
+  position: static;
+  flex: 0 0 auto;
+  display: block;
+  width: var(--art-size, 20px);
+  height: var(--art-size, 20px);
+  margin: 0;
+  transform: none;
+  background: var(--ui-icon-atlas, none) var(--art-x, 0%) var(--art-y, 0%) / 800% 200% no-repeat;
+  opacity: 1;
+  image-rendering: pixelated;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :is([data-theme="tentacle"], [data-theme="ritual"]) :is(.start-inner, #app .brand) {
+    animation: ui-reveal 280ms cubic-bezier(.2, .8, .25, 1);
+  }
+  :is([data-theme="tentacle"], [data-theme="ritual"]) .start-screen::after {
+    animation: ui-light-reveal 720ms ease-out;
+  }
+  :is([data-theme="tentacle"], [data-theme="ritual"]) .msg:is(.clue, .roll).enter {
+    animation: ui-reveal 230ms cubic-bezier(.2, .75, .25, 1);
+  }
+  :is([data-theme="tentacle"], [data-theme="ritual"]) .st-pane:not([hidden]) {
+    animation: ui-reveal 170ms ease-out;
+  }
+}
+
+@keyframes ui-reveal {
+  from { opacity: .28; transform: translateY(5px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes ui-light-reveal {
+  from { opacity: 0; }
+  48% { opacity: .9; }
+}
+
 /* 截图用的悬停模拟（tools/ui/preview.js 的 ?hover=1）：
    截图工具无法真的把鼠标移上去，靠这个类把悬停态固定住。
    与 :hover 保持同一组声明，改悬停效果时两处一起改。 */
@@ -2356,6 +2398,7 @@ select:focus-visible {
     transition-duration: .01ms !important;
     scroll-behavior: auto !important;
   }
+  :is(.modal, .modal-backdrop, .msg.enter) { animation: none !important; }
 }
 
 /* ---- 4. 禁用态统一 ----

@@ -304,7 +304,7 @@ function renderKeeperWithSays(msg, segs, parent = null) {
     const wrap = document.createElement('div');
     const isNpc = seg.kind === 'say';
     wrap.className = `msg ${isNpc ? 'npc' : 'keeper'}`;
-    if (!msg.streaming) wrap.classList.add('enter');
+    if (!msg.streaming && !suppressEnterAnim) wrap.classList.add('enter');
     wrap.dataset.msgId = msg.id;
     if (i > 0) wrap.dataset.sub = String(i);
 
