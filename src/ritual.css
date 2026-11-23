@@ -11,9 +11,15 @@
 [data-theme="ritual"] [data-art="wave"]   { --art-x: 71.4286%; --art-y: 100%; }
 
 [data-theme="ritual"] .start-screen {
-  --gallery-edge: clamp(18px, 3.4vw, 62px);
-  --gallery-left: 39%;
-  place-items: center start;
+  --gallery-edge: clamp(22px, 3vw, 62px);
+  --gallery-gap: clamp(16px, 1.55vw, 32px);
+  --menu-rail: clamp(350px, 35vw, 864px);
+  --gallery-left: calc(var(--gallery-edge) + var(--menu-rail) + var(--gallery-gap));
+  grid-template-columns: var(--menu-rail) minmax(0, 1fr);
+  grid-template-rows: minmax(min-content, 1fr);
+  place-items: stretch;
+  gap: var(--gallery-gap);
+  padding: var(--gallery-edge);
   overflow: auto;
   background:
     linear-gradient(90deg, transparent 37%, rgba(var(--accent2-rgb), .08)),
@@ -42,38 +48,82 @@
 }
 [data-theme="ritual"] :is(.start-atmo, .sigil-shape, .sigil-glyph, .start-rule) { display: none; }
 [data-theme="ritual"] .start-inner {
-  display: flex;
-  align-items: stretch;
-  width: min(410px, 32vw);
-  margin-left: clamp(28px, 4.8vw, 88px);
-  padding-block: 28px;
-  gap: 19px;
+  display: grid;
+  grid-template: auto minmax(min-content, 1fr) auto / minmax(0, 1fr);
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  padding: clamp(16px, 2.4vw, 54px);
+  gap: clamp(13px, 2.8vh, 36px);
+  border: 1px solid var(--border-strong);
+  box-shadow: inset 0 0 0 4px var(--bg-deep), 0 0 0 5px var(--bg-deep), 0 0 0 6px var(--border-soft);
+  background: linear-gradient(151deg, #261c12, #17130e 54%, #1d1f15);
 }
-[data-theme="ritual"] .start-brand { align-items: flex-start; text-align: left; }
+[data-theme="ritual"] .start-inner::before {
+  content: '';
+  position: absolute;
+  top: 17%;
+  left: 50%;
+  width: min(89%, 510px);
+  aspect-ratio: 1;
+  translate: -50% 0;
+  clip-path: circle(48%);
+  background: url('assets/ritual/emblem.webp') center / contain no-repeat;
+  opacity: .14;
+  pointer-events: none;
+}
+[data-theme="ritual"] .start-inner > * { position: relative; }
+[data-theme="ritual"] .start-brand {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  justify-items: start;
+  column-gap: clamp(10px, 1.2vw, 24px);
+  row-gap: 3px;
+  padding-bottom: clamp(12px, 2vh, 24px);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
 [data-theme="ritual"] :is(.start-sigil, .brand .sigil) {
   background: url('assets/ritual/emblem.webp') center / contain no-repeat;
   clip-path: circle(49%);
   image-rendering: pixelated;
 }
-[data-theme="ritual"] .start-sigil { width: 84px; height: 84px; margin-bottom: 6px; }
+[data-theme="ritual"] .start-sigil {
+  grid-row: 1 / span 2;
+  width: clamp(54px, 6vw, 116px);
+  height: auto;
+  aspect-ratio: 1;
+  margin: 0;
+}
 [data-theme="ritual"] .start-brand h1 {
+  align-self: end;
   color: var(--ink-strong);
   font-family: var(--font-serif);
-  font-size: clamp(36px, 3.4vw, 53px);
+  font-size: clamp(27px, 3.15vw, 65px);
   font-weight: 800;
   line-height: 1.13;
   letter-spacing: .055em;
   text-indent: 0;
-  word-break: keep-all;
+  text-wrap: balance;
 }
-[data-theme="ritual"] .start-sub { color: var(--accent); letter-spacing: .135em; font-size: 11px; }
+[data-theme="ritual"] .start-sub {
+  align-self: start;
+  color: var(--accent);
+  letter-spacing: .11em;
+  font-size: clamp(9px, .7vw, 13px);
+}
 [data-theme="ritual"] .start-progress { background: var(--bg-panel); }
 [data-theme="ritual"] .start-progress .sp-dot { background: var(--accent2); animation: none; }
-[data-theme="ritual"] .start-menu { gap: 9px; }
+[data-theme="ritual"] .start-menu {
+  align-self: stretch;
+  justify-content: center;
+  gap: clamp(8px, 1.45vh, 17px);
+}
 [data-theme="ritual"] .menu-btn {
   grid-template-columns: 40px minmax(0, 1fr) 28px;
   align-content: center;
-  min-height: 54px;
+  min-height: clamp(54px, 6.5vh, 80px);
   border-color: var(--border);
   background: var(--bg-panel);
   text-align: left;
@@ -84,25 +134,26 @@
   justify-self: center;
 }
 [data-theme="ritual"] .menu-btn .mb-label {
-  font-size: 16px;
+  font-size: clamp(16px, 1.05vw, 22px);
   line-height: 1.5;
   font-weight: 700;
   text-indent: 0;
   letter-spacing: .08em;
 }
-[data-theme="ritual"] .menu-btn .mb-desc { font-size: 11px; letter-spacing: .025em; color: var(--ink-dim); }
+[data-theme="ritual"] .menu-btn .mb-desc { font-size: clamp(11px, .7vw, 14px); letter-spacing: .025em; color: var(--ink-dim); }
 [data-theme="ritual"] .menu-btn .mb-arrow { padding: 0; text-align: center; }
 [data-theme="ritual"] .menu-btn:is(:hover, :focus-visible) .mb-arrow { opacity: 1; transform: translateX(2px); }
 [data-theme="ritual"] .menu-btn.primary {
   --plate-position: 0%;
-  min-height: 91px;
+  min-height: clamp(78px, 8.6vh, 120px);
+  aspect-ratio: 4.55;
   border: 0;
   grid-template-columns: 29% minmax(0, 1fr) 27px;
   padding-inline-end: 7px;
   background: var(--bg-deep) url('assets/ritual/buttons.webp') center var(--plate-position) / 100% 300% no-repeat;
   image-rendering: pixelated;
 }
-[data-theme="ritual"] .menu-btn.primary .mb-label { color: var(--ink-strong); font-size: 20px; }
+[data-theme="ritual"] .menu-btn.primary .mb-label { color: var(--ink-strong); font-size: clamp(20px, 1.38vw, 29px); }
 [data-theme="ritual"] .menu-btn.primary:is(:hover, :focus-visible, .is-hover-preview) { --plate-position: 50%; }
 [data-theme="ritual"] .menu-btn.primary:active { --plate-position: 100%; }
 [data-theme="ritual"] .menu-btn.primary :is(.mb-mark, .mb-arrow),
@@ -126,11 +177,26 @@
 }
 [data-theme="ritual"] .menu-mini::after { content: none; }
 [data-theme="ritual"] .start-foot {
-  padding-top: 9px;
+  padding-top: clamp(9px, 1vh, 15px);
   border-top: 1px solid var(--border-soft);
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: 4px 9px;
+  font-size: clamp(11px, .69vw, 14px);
+}
+[data-theme="ritual"] .start-model { min-width: 0; overflow-wrap: anywhere; }
+
+@media (min-width: 1350px) and (min-height: 880px) {
+  [data-theme="ritual"] .menu-mini-row { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+  [data-theme="ritual"] .menu-mini {
+    --art-size: 24px;
+    grid-column: span 2;
+    flex-direction: row;
+    gap: 9px;
+    min-height: clamp(50px, 6vh, 76px);
+    font-size: clamp(12px, .8vw, 16px);
+  }
+  [data-theme="ritual"] .menu-mini:nth-child(n + 4) { grid-column: span 3; }
 }
 
 /* 跑团桌面。祭坛图共用于底层和场景栏，小块卡片保留实色底。 */
@@ -251,25 +317,25 @@
 
 @media (max-width: 1160px) {
   [data-theme="ritual"] .brand .subtitle { display: none; }
-  [data-theme="ritual"] .start-screen { --gallery-left: 41%; }
-  [data-theme="ritual"] .start-inner { width: min(385px, 34vw); }
 }
 
 @media (max-height: 760px) {
-  [data-theme="ritual"] .start-sigil { width: 60px; height: 60px; margin-bottom: 2px; }
-  [data-theme="ritual"] .start-inner { gap: 13px; padding-block: 18px; }
-  [data-theme="ritual"] .menu-btn.primary { min-height: 78px; }
+  [data-theme="ritual"] .start-sigil { width: 54px; }
+  [data-theme="ritual"] .start-inner { gap: 12px; padding-block: 17px; }
 }
 
 @media (max-width: 860px) {
-  [data-theme="ritual"] .start-screen { --gallery-left: 0; --gallery-edge: 0; }
+  [data-theme="ritual"] .start-screen {
+    grid-template-columns: minmax(0, 440px);
+    justify-content: center;
+  }
   [data-theme="ritual"] .start-screen::before {
+    inset: 0;
     background-image: linear-gradient(90deg, #110e0bf5, #110e0b60 69%), url('assets/ritual/home.webp');
     background-position: center, 65% center;
     border: 0;
     box-shadow: none;
   }
   [data-theme="ritual"] .start-screen::after { display: none; }
-  [data-theme="ritual"] .start-inner { width: min(360px, calc(100% - 48px)); margin-left: 24px; }
   [data-theme="ritual"] .layout { --rail-left: 158px; --rail-right: 170px; padding: 8px; }
 }
