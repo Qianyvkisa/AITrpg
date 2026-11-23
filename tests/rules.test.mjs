@@ -78,7 +78,8 @@ group('rollD100 范围与奖励惩罚骰', () => {
   ok(/惩罚骰/.test(penalty.bonusPenaltyLabel), '惩罚骰标签正确');
 
   const both = rollD100({ bonus: 1, penalty: 2 });
-  eq(both.candidates.length, 3, '奖励与惩罚同时存在时取较大者');
+  eq(both.candidates.length, 2, '奖励骰和惩罚骰抵消，只掷剩余的惩罚骰');
+  eq(both.value, Math.max(...both.candidates), '抵消后的惩罚骰取最大候选');
 });
 
 group('successLevel 成功等级判定', () => {

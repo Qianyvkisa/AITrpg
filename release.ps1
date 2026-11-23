@@ -3,6 +3,7 @@
 #
 # 用法：
 #   .\release.ps1                     自动选择当前版本的下一个 fix 编号
+#   .\release.ps1 -BaseRelease        发布基础版本（0.5.0 使用标签 v0.5）
 #   .\release.ps1 -Message "修复存档"   指定提交信息
 #   .\release.ps1 -Fix 1 -NotesFile .\release-notes.md  指定编号和 Markdown 正文
 #   .\release.ps1 -SkipTest           跳过测试（不推荐）
@@ -19,6 +20,7 @@
 param(
   [string]$Message,
   [ValidateRange(0, 2147483647)] [int]$Fix,
+  [switch]$BaseRelease,
   [string]$NotesFile,
   [switch]$SkipTest,
   [switch]$NoPush,
@@ -32,6 +34,7 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
+if ($BaseRelease -and $Fix) { throw '-BaseRelease 和 -Fix 不能同时指定。' }
 
 $git  = 'C:\Program Files\Git\cmd\git.exe'
 $node = 'C:\Users\junyu\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe'
@@ -115,7 +118,7 @@ if (-not $NoCommit -and -not $NoPush) {
   $repository = $Matches[1]
   if ($NotesFile) { $NotesFile = (Resolve-Path -LiteralPath $NotesFile).Path }
 
-  if (-not $Fix) {
+  if (-not $BaseRelease -and -not $Fix) {
     $remoteTags = & $git ls-remote --tags --refs origin "refs/tags/v$pkgVersion-fix*"
     if ($LASTEXITCODE -ne 0) { Die '无法查询 GitHub 上已使用的修复编号' }
     $pattern = "refs/tags/v$([regex]::Escape($pkgVersion))-fix([1-9][0-9]*)\s*$"
@@ -125,7 +128,7 @@ if (-not $NoCommit -and -not $NoPush) {
     }
     $Fix = $latest + 1
   }
-  $tag = "v$pkgVersion-fix$Fix"
+  $tag = if ($BaseRelease) { 'v' + ($pkgVersion -replace '\.0$', '') } else { "v$pkgVersion-fix$Fix" }
   Ok "发布标签：$tag"
 }
 # ---- 2. 打包 exe -----------------------------------------------------------
@@ -242,7 +245,8 @@ try {
   & $node tools\publish-release.mjs @releaseArgs
   if ($LASTEXITCODE -ne 0) { throw '上传或发布步骤失败' }
 } catch {
-  Die "GitHub Release $tag 未完成。修复问题后用 -Fix $Fix 重试。$($_.Exception.Message)"
+  $retryMode = if ($BaseRelease) { '-BaseRelease' } else { "-Fix $Fix" }
+  Die "GitHub Release $tag 未完成。修复问题后用 $retryMode 重试。$($_.Exception.Message)"
 } finally {
   $env:GH_TOKEN = $originalToken
 }

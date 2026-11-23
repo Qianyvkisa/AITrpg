@@ -9,7 +9,7 @@
 import { GameEngine } from './core/engine.js';
 import { createCharacter } from './core/character.js';
 import { createInitialState, createDefaultCharacter } from './state.js';
-import { buildSnapshot, applySnapshot } from './persistence.js';
+import { buildSnapshot, applySnapshot, turnCount } from './persistence.js';
 import { generateTeammateLine } from './services/teammate.js';
 import { generateTeammateAction, pickActingTeammates } from './services/teammateAct.js';
 import { renderAll, renderScene, resetPanelCache, applyEditingLock } from './ui/panels.js';
@@ -33,6 +33,8 @@ import { openingFor } from './core/builtinModules.js';
 import { buildReplay, replayFileName } from './core/replay.js';
 import { applyAppearance } from './ui/theme.js';
 import { applyRoomState, claimedCharacter, mergeRoomMessages, publicMessage, publicRoomState, rollOwner, roomHistory } from './core/onlineSession.js';
+import { incapacity } from './core/vitals.js';
+import { waitsForWoundCheck } from './core/directives.js';
 const $ = (sel) => document.querySelector(sel);
 
 const state = createInitialState();
@@ -104,7 +106,9 @@ function togglePanel(side) {
 }
 
 /** 进入跑团界面（重建消息流 + 全量重绘） */
-function enterGame() {  $('#startScreen').hidden = true;
+function enterGame() {
+  const repaired = state.net.role !== 'client' && engine.reconcileParty();
+  $('#startScreen').hidden = true;
   $('#app').hidden = false;
 
   // 开局后不再允许增删队友与调查员，避免破坏已跑起来的局面
@@ -124,6 +128,7 @@ function enterGame() {  $('#startScreen').hidden = true;
   scrollToBottom({ force: true });
   $('#input')?.focus();
   publishRoomState({ reset: true });
+  return repaired;
 }
 
 // ---------------------------------------------------------------------------
@@ -311,7 +316,7 @@ function toggleAutoAdvance() {
 
 /** 旁观模式下「推进」：没有输入内容时给 KP 一个默认的推进指令 */
 async function spectatorAdvance(opts = {}) {
-  if (busy || hasPendingRoll() || state.net.role === 'client') return;
+  if (busy || hasPendingRoll() || state.scenario.ended || state.net.role === 'client') return;
 
   // 手动推进时先把挂起的自动推进取消，避免紧接着又触发一次
   if (!opts.fromAuto) {
@@ -337,8 +342,7 @@ async function spectatorAdvance(opts = {}) {
   }
 
   busy = true;
-  const btn = $('#btnSend');
-  btn.disabled = true;
+  updateRollGate();
   // 这一轮是否失败。失败时 finally 里不能无条件 resume：
   //   - 可恢复故障：recoverAfterFailure 已经排好退避定时器，resume 会被
   //     它的幂等保护挡住，无害；但配置错误时定时器已被取消，resume 会
@@ -349,6 +353,7 @@ async function spectatorAdvance(opts = {}) {
     // 只有这一轮真的跑成了才计轮数。KP 连不上时不计，否则轮数会虚增，
     // 而且自动推进会拿着「成功」的信号继续往下跑。
     if (res?.ok === false) {
+      if (state.keeperContinuation) await autoSave();
       // 失败时**不关开关**。
       //
       // 原来这里是 stopAutoAdvance(null)，结果是上游网关抖一下（502）就让
@@ -367,7 +372,6 @@ async function spectatorAdvance(opts = {}) {
     }
     // 这一轮成功：清零失败计数，下次故障重新有完整的重试预算
     autoRunner.noteSuccess();
-    if (!retry) state.turns = (state.turns || 0) + 1;
     await autoSave();
   } catch (e) {
     console.error(e);
@@ -376,9 +380,9 @@ async function spectatorAdvance(opts = {}) {
     failed = true;
     autoRunner.recoverAfterFailure(e?.message || String(e));
   } finally {
-    btn.disabled = false;
     busy = false;
     updateRollGate();
+    renderScene(state);
     // 每轮结束刷新 token 指示器：引擎在 runKeeper 里累计了本次请求的用量
     updateTokenMeter();
     // 这一轮若产生了待掷骰，自动推进要**暂停**（不是关闭）：
@@ -417,8 +421,7 @@ async function spectatorAdvance(opts = {}) {
  * 判定标准：自动存档里存在玩家行动记录（真的跑过一轮）才算「有进度」。
  *
  * 三种按钮的组合规则：
- *   有进度  → 只显示「继续」 + 「放弃游戏」，「开始」隐藏
- *   无进度  → 只显示「开始」，「继续」与「放弃游戏」都隐藏
+ *   已结束的调查可以回顾，也可以直接开始新团。
  */
 async function refreshStartScreen() {
   // 底部显示当前模型，未配置时给出提示
@@ -440,24 +443,28 @@ async function refreshStartScreen() {
   // 有进度才显示「继续」：仅有开场白、还没行动过的不算
   const hasProgress = hasRunTurn(snap);
 
-  const vis = menuButtonVisibility(hasProgress);
+  const ended = !!snap?.scenario?.ended;
+  const vis = menuButtonVisibility(hasProgress, ended);
   $('#menuStart').hidden = !vis.start;
-  $('#menuContinue').hidden = !vis.cont;
+  const continueButton = $('#menuContinue');
+  continueButton.hidden = !vis.cont;
+  continueButton.classList.toggle('primary', !ended);
+  continueButton.querySelector('.mb-label').textContent = ended ? '回顾结局' : '继续';
   $('#menuAbandon').hidden = !vis.abandon;
 
   if (hasProgress) {
     const title = auto?.meta?.title || '自由创作';
     const scene = auto?.meta?.scene || snap?.scenario?.scene || '';
     const who = auto?.meta?.charName || snap?.playerChar?.name || '';
-    const turns = auto?.meta?.turns ?? (snap?.messages || []).filter((m) => m.role === 'user').length;
+    const turns = turnCount(snap);
 
     // 「继续」按钮上的描述只写动作，不重复上面进度条已经说过的模组/角色/轮数：
     // 两处都写「埃莉诺·万斯 · 第 27 轮」是同一句话看两遍，反而挤占视觉空间。
-    $('#menuContinueDesc').textContent = '接着上次的进度继续调查';
+    $('#menuContinueDesc').textContent = ended ? '查看结局和本次跑团记录' : '接着上次的进度继续调查';
 
     // 详细信息放在按钮上方的进度条里，模组名与场景各占一行、可以换行显示
     $('#spTitle').textContent = title;
-    $('#spMeta').textContent = [scene, who, turns ? `第 ${turns} 轮` : '尚未行动']
+    $('#spMeta').textContent = [scene, who, ended ? '调查已结束' : turns ? `第 ${turns} 轮` : '尚未行动']
       .filter(Boolean)
       .join(' · ');
     $('#startProgress').hidden = false;
@@ -552,8 +559,11 @@ function handleEngineEvent(ev) {
 const panelHandlers = {
   onEdit: (ch) => {
     if (state.net.role !== 'client' && !busy) openCharEditor(state, ch, () => {
+      engine.reconcileParty();
       renderAll(state, panelHandlers);
+      updateRollGate();
       publishRoomState();
+      autoSave().catch((error) => engine.pushMessage({ role: 'system', text: `【存档失败】${error.message}` }));
     });
   },
   onRemove: (t) => {
@@ -587,41 +597,54 @@ function updateRollGate() {
   const room = state.net.room;
   const own = client && claimedCharacter(state, state.net.myPlayerId);
   const retry = !client && state.keeperContinuation;
+  const ended = !!state.scenario.ended;
+  const disabledCharacter = incapacity(client ? own : state.playerChar);
+  const observe = !client && !!disabledCharacter && state.mode !== 'spectator';
   const clientHint = !client ? ''
     : state.net.status !== 'online' ? '正在连接房主…'
     : !room?.ready ? '等待房主进入调查…'
     : !own ? '在「联机」中选择一位调查员…'
+    : disabledCharacter ? `你的调查员处于${disabledCharacter}状态，等待其他调查员行动…`
     : room.busy || room.continuation ? '等待房主继续叙事…' : '';
-  const disabled = !!clientHint || pending || busy || state.scenario.ended;
+  const disabled = !!clientHint || pending || busy || ended;
 
   if (sendBtn) {
     sendBtn.disabled = disabled;
-    const label = pending ? '先掷骰' : busy ? '叙事中…' : retry ? '继续叙事' : (state.mode === 'spectator' ? '推进' : '行动');
+    const label = ended ? '调查已结束' : pending ? '先掷骰' : busy ? '叙事中…' : retry ? '继续叙事'
+      : observe ? '推进同伴' : state.mode === 'spectator' ? '推进' : '行动';
     if (sendBtn.textContent !== label) sendBtn.textContent = label;
   }
   if (input) {
-    input.disabled = !!clientHint || pending || state.scenario.ended || retry;
-    input.placeholder = clientHint || (pending ? '等待对应调查员完成检定…'
+    input.disabled = !!clientHint || pending || ended || !!retry || observe;
+    input.placeholder = ended ? state.scenario.ending || '本次调查已结束。' : clientHint || (pending ? '等待对应调查员完成检定…'
       : retry ? '请继续守密人的叙事…'
+      : observe ? `你的调查员处于${disabledCharacter}状态，可推进同伴的行动。`
       : state.mode === 'spectator' ? '输入剧情指示，或留空直接推进…' : '描述你的行动…');
   }
-  const pendingRolls = pending ? new Map(engine.pendingRolls().map((roll) => [roll.id, roll])) : new Map();
+  const chatter = $('#btnAuto');
+  if (chatter) chatter.disabled = client || ended || busy || pending || !!retry ||
+    !state.teammates.some((character) => !incapacity(character) && !rollOwner(state, character));
+  if (ended && state.autoAdvance) stopAutoAdvance(null);
+  const queue = pending ? engine.pendingRolls() : [];
+  const pendingRolls = new Map(queue.map((roll) => [roll.id, roll]));
   for (const button of document.querySelectorAll('.roll-btn')) {
     const roll = pendingRolls.get(button.dataset.rollId);
     if (!roll) continue;
     const allowed = canRoll(roll);
-    button.disabled = busy || (client && (room?.busy || state.net.status !== 'online')) || !allowed;
-    button.title = allowed ? '' : `等待 ${roll.who} 的玩家掷骰`;
+    const prerequisite = waitsForWoundCheck(roll, queue);
+    button.disabled = ended || busy || (client && (room?.busy || state.net.status !== 'online')) || !allowed || prerequisite;
+    button.title = prerequisite ? '请先完成重伤体质检定' : allowed ? '' : `等待 ${roll.who} 的玩家掷骰`;
   }
 }
 
 /** 处理掷骰按钮点击 */
 async function handleRollClick(rollId, playerId = '') {
-  if (!rollId || busy) return;
+  if (!rollId || busy || state.scenario.ended) return;
   if (!engine) return;
 
-  const target = engine.pendingRolls().find((p) => p.id === rollId);
-  if (!target || !canRoll(target, playerId)) return;
+  const queue = engine.pendingRolls();
+  const target = queue.find((p) => p.id === rollId);
+  if (!target || !canRoll(target, playerId) || waitsForWoundCheck(target, queue)) return;
   if (state.net.role === 'client') return sendRoomRequest('roll', { pendingId: rollId });
 
   busy = true;
@@ -752,7 +775,6 @@ async function sendRoomRequest(kind, payload) {
 
 function syncClientControls() {
   const client = state.net.role === 'client';
-  $('#btnAuto').disabled = client;
   $('#btnModules').disabled = client;
   $('#btnSaves').disabled = client;
   updateRollGate();
@@ -859,13 +881,16 @@ function bindNetEvents() {
     if (busy || hasPendingRoll() || state.keeperContinuation || state.scenario.ended) {
       return roomError(player.id, '本轮暂时不能行动，请等待当前叙事或检定结束。');
     }
+    const blocked = incapacity(actor);
+    if (blocked) return roomError(player.id, `${actor.name}（${blocked}）无法行动。`);
     runPlayerTurn(`[${actor.name}（${player.name}）] ${text}`, { actorId: actor.id });
   });
 
   net.onRoll(({ player, pendingId }) => {
     if (state.net.role !== 'host') return;
-    const roll = engine.pendingRolls().find((entry) => entry.id === pendingId);
-    if (!hostGameReady() || busy || !roll || !canRoll(roll, player.id)) {
+    const queue = engine.pendingRolls();
+    const roll = queue.find((entry) => entry.id === pendingId);
+    if (!hostGameReady() || busy || !roll || !canRoll(roll, player.id) || waitsForWoundCheck(roll, queue)) {
       return roomError(player.id, '这个检定当前不能由你掷骰。');
     }
     handleRollClick(pendingId, player.id);
@@ -1025,7 +1050,7 @@ function bindUI() {
     });
   }
   $('#input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
       e.preventDefault();
       if (state.mode === 'spectator') spectatorAdvance();
       else sendAction();
@@ -1063,8 +1088,8 @@ function openSaveDialog() {
       state.autoAdvance = false;
       // 读档后立刻写回自动存档：这样「继续」与当前这一局保持一致，
       // 避免从手动存档进入游戏、回主界面后却显示「开始」而误以为进度丢了
-      await autoSave();
       enterGame();
+      await autoSave();
     }
   });
 }
@@ -1126,7 +1151,7 @@ async function continueGame() {
   state.autoAdvance = false;
   // 旁观模式本来就没有玩家角色，不要凭空补一个
   if (!state.playerChar && state.mode !== 'spectator') state.playerChar = createDefaultCharacter();
-  enterGame();
+  if (enterGame()) await autoSave();
 }
 
 /**
@@ -1162,11 +1187,15 @@ async function sendAction() {
   const text = input.value.trim();
   const client = state.net.role === 'client';
   const retry = !client && state.keeperContinuation;
+  if (!client && !retry && incapacity(state.playerChar)) {
+    return runPlayerTurn('（推进仍能行动的调查员，保留失去行动能力者的当前状态）', { hidden: true });
+  }
   if (!retry && !text) return;
 
   if (client) {
     const room = state.net.room;
-    if (!room?.ready || room.busy || room.continuation || !claimedCharacter(state, state.net.myPlayerId)) return;
+    const own = claimedCharacter(state, state.net.myPlayerId);
+    if (!room?.ready || room.busy || room.continuation || !own || incapacity(own)) return;
     if (await sendRoomRequest('action', { text }) && input.value.trim() === text) {
       input.value = '';
       input.style.height = 'auto';
@@ -1189,14 +1218,12 @@ async function sendAction() {
 }
 
 async function runPlayerTurn(text, opts) {
-  const retry = state.keeperContinuation;
   busy = true;
   updateRollGate();
   publishRoomState();
 
   try {
     const res = await engine.takeTurn(text, opts);
-    if (res?.ok !== false && !retry) state.turns = (state.turns || 0) + 1;
     if (res?.ok !== false || state.keeperContinuation) await autoSave();
   } catch (e) {
     console.error(e);
@@ -1205,6 +1232,7 @@ async function runPlayerTurn(text, opts) {
     busy = false;
     updateRollGate();
     publishRoomState();
+    renderScene(state);
     updateTokenMeter();
   }
 }
@@ -1227,15 +1255,14 @@ async function planTeammateActions() {
   if (!acting.length) return [];
 
   // 玩家这一轮刚说了什么：队友要能针对它做反应
-  const lastUser = [...state.messages].reverse().find((m) => m.role === 'user');
+  const lastUser = state.messages.findLast((m) => m.role === 'user');
   const playerAction = lastUser?.text || '';
 
   const plans = [];
 
   for (const char of acting) {
     // 前面的队友刚行动过，就提示这位别重复
-    const lastActor = [...state.messages].reverse()
-      .find((m) => m.role === 'teammate-action')?.name;
+    const lastActor = state.messages.findLast((m) => m.role === 'teammate-action')?.name;
 
     const res = await generateTeammateAction(state, window.api, char, {
       playerAction,
@@ -1269,26 +1296,33 @@ async function planTeammateActions() {
 
 /** 队友 AI 主动插话 */
 async function teammateSpeak(opts = {}) {
-  if (state.net.role === 'client' || state.keeperContinuation || hasPendingRoll() || (busy && !opts.fromEngine)) return;
+  if (state.scenario.ended || state.net.role === 'client' || state.keeperContinuation ||
+      hasPendingRoll() || (busy && !opts.fromEngine)) return;
 
-  const teammates = state.teammates.filter((character) => !rollOwner(state, character));
-  if (!teammates.length) {
-    if (!opts.fromEngine) alert('还没有队友。点左侧「队友 +」添加一位。');
-    return;
+  const teammates = state.teammates.filter((character) => !rollOwner(state, character) && !incapacity(character));
+  if (!teammates.length) return;
+  if (!opts.fromEngine) {
+    busy = true;
+    updateRollGate();
+    publishRoomState();
   }
 
-  const res = await generateTeammateLine({ ...state, teammates }, window.api);
-  if (!res.ok) {
-    // 自动插话失败时不打扰玩家，只在手动模式下提示
+  try {
+    const res = await generateTeammateLine({ ...state, teammates }, window.api);
+    if (!res.ok) throw new Error(res.error);
+    engine.pushMessage({ role: 'teammate', name: res.name, text: res.text });
+    scrollToBottom();
+    await autoSave();
+  } catch (error) {
+    if (opts.fromEngine) throw error;
+    engine.pushMessage({ role: 'system', text: `【队友 AI 失败】${error.message}` });
+  } finally {
     if (!opts.fromEngine) {
-      engine.pushMessage({ role: 'system', text: `【队友 AI 失败】${res.error}` });
+      busy = false;
+      updateRollGate();
+      publishRoomState();
     }
-    return;
   }
-
-  engine.pushMessage({ role: 'teammate', name: res.name, text: res.text });
-  scrollToBottom();
-  await autoSave();
 }
 
 // ---------------------------------------------------------------------------

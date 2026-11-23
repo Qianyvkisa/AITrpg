@@ -4,7 +4,7 @@
 // 规则：
 //   有进度  → 「继续」+「放弃游戏」，隐藏「开始」
 //   无进度  → 只显示「开始」，隐藏「继续」与「放弃游戏」
-// 即「开始」与「继续」永远互斥，绝不同时出现。
+// 已结团可回顾，也可从主界面开始新团。
 // ---------------------------------------------------------------------------
 
 /**
@@ -15,6 +15,7 @@
 export function hasRunTurn(snapshot) {
   const s = snapshot?.state || snapshot;
   if (!s) return false;
+  if (s.scenario?.ended) return true;
 
   const users = (s?.messages || []).filter((m) => m.role === 'user').length;
   if (users > 0) return true;
@@ -31,9 +32,9 @@ export function hasRunTurn(snapshot) {
  * @param {boolean} hasProgress 是否存在可继续的进度
  * @returns {{start: boolean, cont: boolean, abandon: boolean}}
  */
-export function menuButtonVisibility(hasProgress) {
+export function menuButtonVisibility(hasProgress, ended = false) {
   return {
-    start: !hasProgress,
+    start: !hasProgress || ended,
     cont: hasProgress,
     abandon: hasProgress
   };

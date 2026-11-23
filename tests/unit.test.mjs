@@ -136,9 +136,9 @@ group('指令处理器执行', () => {
   ok(state.scenario.ended, 'END 标记结束');
   eq(state.scenario.ending, '你逃出了旧宅', 'END 记录结局');
 
-  // 未知角色不应抛错，而是安静跳过
-  ok(getHandler('HP')(ctx, { type: 'HP', head: '-1', opts: { 角色: '不存在的人' } }) === null,
-    '未知角色返回 null 而非抛错');
+  const missing = getHandler('HP')(ctx, { type: 'HP', head: '-1', opts: { 角色: '不存在的人' } });
+  eq(missing.kind, 'error', '未知角色返回结算错误');
+  ok(missing.text.includes('不存在的人'), '错误包含无法匹配的角色');
 });
 
 group('summarizeResults 结果汇总', () => {

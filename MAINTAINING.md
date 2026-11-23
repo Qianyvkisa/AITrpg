@@ -350,6 +350,7 @@ Module._load = function (request, ...args) {
 
 ```powershell
 .\release.ps1                      # 选择下一个 fix 编号，打包、推送并上传
+.\release.ps1 -BaseRelease         # 发布基础版本，例如 0.5.0 对应 v0.5
 .\release.ps1 -Message "修复存档"
 .\release.ps1 -Fix 2 -NotesFile .\release-notes.md
 .\release.ps1 -SkipTest            # 跳过测试（不推荐）
@@ -358,8 +359,8 @@ Module._load = function (request, ...args) {
 ```
 
 脚本依次跑测试、打包并核对便携 EXE、提交工作区、推送 `main` 和修复标签、上传附件并公开 Release。
-标签沿用 `package.json` 的基础版本并递增修订号，例如 `v0.4.1-fix1`。上传附件命名为 `COC-v0.4.1-fix1.exe`。
-正文默认使用提交标题，也可用 `-NotesFile` 传入 UTF-8 Markdown 文件。上传失败后，可用原 `-Fix` 编号重试同一提交。
+标签沿用 `package.json` 的版本。默认发布递增的修订标签，例如 `v0.5.0-fix1`。使用 `-BaseRelease` 发布基础版本，省略为零的补丁位。附件按标签命名，例如 `COC-v0.5.exe`。
+正文默认使用提交标题，也可用 `-NotesFile` 传入 UTF-8 Markdown 文件。上传失败后，可用原来的 `-BaseRelease` 或 `-Fix` 编号重试同一提交。
 
 上传使用 `GH_TOKEN` 或 `GITHUB_TOKEN`。两者都为空时，脚本使用本机已配置的 GitHub 凭据。
 

@@ -9,6 +9,7 @@ export function randInt(min, max) {
 }
 
 const TERM_RE = /([+-])?(\d+d\d+|\d+|d\d+)/gi;
+const MAX_DICE = 1000;
 
 /**
  * 解析骰子表达式，支持多项求和：
@@ -26,18 +27,17 @@ export function maxDiceTotal(expr) {
 
 function evaluateDice(expr, pick, collectRolls) {
   const src = String(expr).replace(/\s/g, '');
+  const invalid = { total: 0, rolls: [], mod: 0, expr: String(expr), invalid: true };
+  if (src.length > 256) return invalid;
   const terms = [...src.matchAll(TERM_RE)];
 
-  // 必须整体都是合法项，否则按非法表达式处理（保持旧行为）
   const covered = terms.reduce((n, m) => n + m[0].length, 0);
-  if (!terms.length || covered !== src.length) {
-    const flat = parseInt(expr, 10);
-    return { total: isNaN(flat) ? 0 : flat, rolls: [], mod: 0, expr: String(expr) };
-  }
+  if (!terms.length || covered !== src.length || terms.slice(1).some((term) => !term[1])) return invalid;
 
   const rolls = [];
   let total = 0;
   let mod = 0;
+  let diceCount = 0;
 
   for (const m of terms) {
     const sign = m[1] === '-' ? -1 : 1;
@@ -45,8 +45,10 @@ function evaluateDice(expr, pick, collectRolls) {
     const dice = body.match(/^(\d*)d(\d+)$/);
 
     if (dice) {
-      const count = dice[1] ? parseInt(dice[1], 10) : 1;
-      const sides = parseInt(dice[2], 10);
+      const count = dice[1] ? Number(dice[1]) : 1;
+      const sides = Number(dice[2]);
+      diceCount += count;
+      if (!count || diceCount > MAX_DICE || !sides || sides > 1000000) return invalid;
       if (collectRolls) {
         for (let i = 0; i < count; i++) {
           const v = pick(sides, sign) * sign;
@@ -57,12 +59,14 @@ function evaluateDice(expr, pick, collectRolls) {
         total += count * pick(sides, sign) * sign;
       }
     } else {
-      const v = parseInt(body, 10) * sign;
+      const v = Number(body) * sign;
+      if (!Number.isSafeInteger(v)) return invalid;
       mod += v;
       total += v;
     }
   }
 
+  if (!Number.isSafeInteger(total) || !Number.isSafeInteger(mod)) return invalid;
   return { total, rolls, mod, expr: String(expr) };
 }
 
@@ -91,6 +95,10 @@ export function expandDb(expr, db) {
  * 返回 01-100（00+0 视为 100）。
  */
 export function rollD100({ bonus = 0, penalty = 0 } = {}) {
+  const diceCount = (value) => Number.isFinite(Number(value)) ? Math.max(0, Math.min(2, Math.floor(Number(value)))) : 0;
+  const net = diceCount(bonus) - diceCount(penalty);
+  bonus = Math.max(0, net);
+  penalty = Math.max(0, -net);
   const units = randInt(0, 9);            // 个位 0-9
   const tensCount = 1 + Math.max(bonus, penalty);
   const tensList = [];

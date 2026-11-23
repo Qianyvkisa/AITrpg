@@ -65,11 +65,15 @@ app.whenReady().then(async () => {
     registerConfigIpc();
     registerSaveIpc();
     registerNetIpc(() => win);
-    const replies = ['你听见响动。[[SAN:2/2]]', '响动平息了。'];
+    const replies = [
+      '你听见响动。[[SAN:2/2]]', '响动平息了。',
+      `石门倒塌。[[DAMAGE:${character.hp.max}]]`, '房主留在原地。'
+    ];
     ipcMain.handle('llm:chat', (_event, request) => {
       assert.equal(request.purpose, 'keeper');
-      assert.ok(replies.length, '模型调用不应多于两次');
-      if (replies.length === 1) assert.match(request.messages.at(-1).content, /损失 2 点 SAN/);
+      assert.ok(replies.length, '倒下的客人不得触发额外模型请求');
+      if (replies.length === 3) assert.match(request.messages.at(-1).content, /损失 2 点 SAN/);
+      if (replies.length === 1) assert.match(request.messages.at(-1).content, /死亡/);
       return { ok: true, text: replies.shift() };
     });
 
@@ -91,7 +95,9 @@ app.whenReady().then(async () => {
     const port = await until('房主开房', () => run('window.api.net.hostPlayers().then((r) => r.port)'));
     guest = new Client({ host: '127.0.0.1', port, name: '客人' });
     const received = [];
+    const roomErrors = [];
     guest.on('message', (message) => received.push(message));
+    guest.on('server-error', (message) => roomErrors.push(message));
     guest.on('error', (error) => console.error(error));
     const { playerId } = await guest.connect();
     guest.ready();
@@ -111,6 +117,17 @@ app.whenReady().then(async () => {
       .some((message) => message.text === '响动平息了。'));
     await until('房主与客人的 SAN 同步', () => received.some((message) => message.state?.teammates[0]?.san.current === character.san.current - 2));
     assert.equal(await run('document.querySelector("#messages").textContent.includes("响动平息了。")'), true);
+    await until('续写后房主空闲', () => received.findLast((message) => message.state)?.state.busy === false);
+    guest.action('检查石门。');
+    const injuredRoom = await until('倒下的队友状态同步到客人', () => {
+      const state = received.findLast((message) => message.state)?.state;
+      return state?.teammates[0]?.hp.current === 0 && state.busy === false ? state : null;
+    });
+    assert.equal(injuredRoom.playerChar.hp.current, state.playerChar.hp.current);
+    assert.equal(injuredRoom.scenario.ended, false);
+    assert.ok(injuredRoom.teammates[0].status.includes('死亡'));
+    guest.action('倒下后再次尝试行动。');
+    await until('房主拒绝失去行动能力的客户端请求', () => roomErrors.some((error) => /无法行动/.test(error)));
     assert.equal(replies.length, 0);
     guest.close('left room');
     guest = null;
@@ -152,8 +169,14 @@ app.whenReady().then(async () => {
     await click('.roll-btn');
     await until('客人收到结算并移除待掷骰按钮', () => run('!document.querySelector(".roll-btn") && document.querySelector("#messages").textContent.includes("房主结算完成")'));
     assert.equal(rollId, 'pending-1');
+    remote.broadcast('patch', {
+      state: { ...room, teammates: [{ ...room.teammates[0], hp: { ...room.teammates[0].hp, current: 0 }, status: ['昏迷'] }] }
+    });
+    await until('客人自己倒下后输入和行动按钮锁定', () => run(
+      'document.querySelector("#btnSend").disabled && document.querySelector("#input").disabled && document.querySelector("#input").placeholder.includes("昏迷")'
+    ));
 
-    console.log('Electron 联机通过：房主推进、客人认领与掷骰、双端公开状态同步。');
+    console.log('Electron 联机通过：认领、掷骰、伤害同步、倒下角色的房主与客端限制。');
   } finally {
     guest?.close();
     if (remote) await remote.close();

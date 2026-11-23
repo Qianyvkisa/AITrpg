@@ -9,9 +9,10 @@ import { restoreInvestigation } from './core/investigation.js';
  * 玩家模式以玩家消息条数为准；旁观模式没有玩家消息，用显式轮数。
  * 两个来源都取最大值，避免旧存档或新字段缺失时算出 0。
  */
-function turnCount(state) {
-  const fromMessages = (state.messages || []).filter((m) => m.role === 'user').length;
-  const explicit = state.turns || 0;
+export function turnCount(state) {
+  const fromMessages = (state.messages || []).filter((m) => m.role === 'user').length
+    - (state.keeperContinuation?.retryAction ? 1 : 0);
+  const explicit = Number(state.turns) || 0;
   return Math.max(fromMessages, explicit);
 }
 

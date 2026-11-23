@@ -5,10 +5,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { createCharacter } from '../src/core/character.js';
-import { getHandler } from '../src/core/directives.js';
+import { getHandler, resolveSkillValue } from '../src/core/directives.js';
+import { rollDice, rollD100 } from '../src/core/dice.js';
+import { applyDamage, incapacity, recoverHp } from '../src/core/vitals.js';
 import { GameEngine } from '../src/core/engine.js';
 import { createInitialState } from '../src/state.js';
-import { applySnapshot, buildSnapshot } from '../src/persistence.js';
+import { applySnapshot, buildSnapshot, turnCount } from '../src/persistence.js';
+import { hasRunTurn, menuButtonVisibility } from '../src/ui/menu.js';
+import { generateTeammateAction, pickActingTeammates } from '../src/services/teammateAct.js';
 import { applyRoomState, mergeRoomMessages, publicMessage, publicRoomState, rollOwner, roomHistory } from '../src/core/onlineSession.js';
 
 function fixedDice(digits, run) {
@@ -25,6 +29,242 @@ function createEngine(state, respond) {
 }
 
 const storedSnapshot = (state) => JSON.parse(JSON.stringify(buildSnapshot(state)));
+
+test('奇数最大 HP 的重伤门槛、累计小伤昏迷、濒死和即死分别结算', () => {
+  const ch = createCharacter({ name: '林默' });
+  ch.hp = { max: 11, current: 11 };
+  assert.equal(applyDamage(ch, 5).majorWound, false);
+  assert.equal(applyDamage(ch, 5).majorWound, false);
+  assert.equal(applyDamage(ch, 1).outcome, '昏迷');
+  assert.equal(incapacity(ch), '昏迷');
+  assert.equal(recoverHp(ch, 1), 1);
+  assert.equal(incapacity(ch), '');
+  assert.equal(applyDamage(ch, 6).outcome, '濒死');
+  assert.equal(incapacity(ch), '濒死');
+  assert.equal(recoverHp(ch, 1), 1);
+  assert.equal(incapacity(ch), '');
+  assert.ok(ch.status.includes('重伤'));
+  assert.equal(applyDamage(ch, 11).outcome, '死亡');
+  assert.equal(recoverHp(ch, 5), 0);
+  assert.equal(incapacity(ch), '死亡');
+  assert.equal(ch.hp.current, 0);
+});
+
+test('唯一旁观调查员 HP 归零时结团并停用自动续写与队友动作', async () => {
+  const state = createInitialState();
+  state.mode = 'spectator';
+  const actor = createCharacter({ name: '向导' });
+  actor.hp.current = 2;
+  state.teammates = [actor];
+  let calls = 0;
+  const engine = createEngine(state, async () => {
+    calls++;
+    return { ok: true, text: '石门压下来。[[HP:-2]]' };
+  });
+  engine.setTeammateActor(() => assert.fail('终局后不可调用队友模型'));
+  assert.equal((await engine.takeTurn('推进', { hidden: true })).ok, true);
+  assert.equal(actor.hp.current, 0);
+  assert.equal(incapacity(actor), '昏迷');
+  assert.equal(state.scenario.ended, true);
+  assert.match(state.scenario.ending, /向导.*昏迷/);
+  assert.equal(state.keeperContinuation, null);
+  assert.equal((await engine.takeTurn('再推进', { hidden: true })).ok, false);
+  assert.equal(calls, 1);
+  assert.equal(turnCount(state), 1);
+  assert.equal(hasRunTurn(storedSnapshot(state)), true);
+  assert.deepEqual(menuButtonVisibility(true, true), { start: true, cont: true, abandon: true });
+});
+
+test('有幸存者时，倒下的调查员不能代发行动，同伴救援后可以恢复', async () => {
+  const state = createInitialState();
+  const pc = state.playerChar = createCharacter({ name: '房主', isPlayer: true });
+  pc.hp.current = 0;
+  const ally = createCharacter({ name: '医师' });
+  state.teammates = [ally];
+  const engine = createEngine(state, async ({ messages }) => {
+    assert.match(messages[0].content, /旁观/);
+    return { ok: true, text: '医师伸手援助。[[HP:+1|角色=房主]]' };
+  });
+  assert.equal((await engine.takeTurn('冲出去', { actorId: pc.id })).ok, false);
+  assert.equal((await engine.takeTurn('推进同伴', { hidden: true })).ok, true);
+  assert.equal(pc.hp.current, 1);
+  assert.equal(incapacity(pc), '');
+  assert.equal(state.scenario.ended, false);
+});
+
+test('已有普通待掷骰的调查员受伤倒下时，取消骰子并将结算回喂', async () => {
+  const state = createInitialState();
+  const pc = state.playerChar = createCharacter({ name: '林默', isPlayer: true });
+  pc.hp.current = 2;
+  state.teammates = [createCharacter({ name: '向导' })];
+  const engine = createEngine(state, () => assert.fail('直接结算不应发起叙事'));
+  await engine.resolveDirectives([
+    { type: 'CHECK', head: '侦查', opts: {} },
+    { type: 'DAMAGE', head: '2', opts: {} }
+  ]);
+  assert.equal(engine.pendingRolls().length, 0);
+  assert.equal(state.messages.find((m) => m.data?.kind === 'check').data.status, 'cancelled');
+  assert.match(state.messages.at(-1).text, /检定取消/);
+  assert.equal(state.scenario.ended, false);
+  assert.equal(state.rollBatch, null);
+});
+
+test('重伤应先让玩家掷实际体质，失败会取消其余普通检定', async () => {
+  const state = createInitialState();
+  const pc = state.playerChar = createCharacter({ name: '林默', isPlayer: true });
+  pc.attrs.CON = 55;
+  const engine = createEngine(state, () => assert.fail('全员倒下后不再续写'));
+  await engine.resolveDirectives([
+    { type: 'DAMAGE', head: '5', opts: {} },
+    { type: 'CHECK', head: '侦查', opts: {} }
+  ]);
+  const [con, skill] = engine.pendingRolls();
+  assert.equal(con.skill, '体质');
+  assert.equal(con.adjusted, 55);
+  assert.equal(await engine.rollAndResume(skill.id), null);
+  const original = Math.random;
+  try {
+    Math.random = () => 0.9;
+    const result = await engine.rollAndResume(con.id);
+    assert.equal(result.passed, false);
+  } finally {
+    Math.random = original;
+  }
+  assert.equal(pc.hp.current, 5);
+  assert.equal(incapacity(pc), '昏迷');
+  assert.equal(state.scenario.ended, true);
+  assert.equal(engine.pendingRolls().length, 0);
+});
+
+test('濒死体质可由仍有同伴的调查员掷出，失败记录死亡', async () => {
+  const state = createInitialState();
+  const pc = state.playerChar = createCharacter({ name: '林默', isPlayer: true });
+  pc.hp.current = 2;
+  const ally = createCharacter({ name: '医师' });
+  state.teammates = [ally];
+  const engine = createEngine(state, async () => ({ ok: true, text: '医师仍在现场。' }));
+  await engine.resolveDirectives([
+    { type: 'DAMAGE', head: '5', opts: {} },
+    { type: 'CHECK', head: '体质', opts: { 角色: pc.name, 用途: '濒死' } }
+  ]);
+  const [roll] = engine.pendingRolls();
+  assert.equal(roll.effect, 'dying');
+  assert.equal(incapacity(pc), '濒死');
+  const original = Math.random;
+  try {
+    Math.random = () => 0.9;
+    assert.match((await engine.rollAndResume(roll.id)).outcome, /死亡/);
+  } finally {
+    Math.random = original;
+  }
+  assert.equal(incapacity(pc), '死亡');
+  assert.equal(state.scenario.ended, false);
+});
+
+test('END 取消已登记检定，并阻止本条回复的后续状态变更', async () => {
+  const state = createInitialState();
+  const pc = state.playerChar = createCharacter({ name: '林默', isPlayer: true });
+  const engine = createEngine(state, async () => ({ ok: true, text: '[[CHECK:侦查]][[END:撤离]][[HP:-10]][[SCENE:其他地方]]' }));
+  assert.equal((await engine.takeTurn('撤离')).ok, true);
+  assert.equal(state.scenario.ending, '撤离');
+  assert.equal(pc.hp.current, pc.hp.max);
+  assert.equal(engine.pendingRolls().length, 0);
+  assert.equal(state.messages.find((m) => m.data?.kind === 'check').data.status, 'cancelled');
+  assert.equal(state.scenario.scene, '');
+});
+
+test('旧存档结团后清理掉已失效的骰子和续写标记', () => {
+  const state = createInitialState();
+  const pc = state.playerChar = createCharacter({ name: '林默', isPlayer: true });
+  const engine = createEngine(state, () => assert.fail('读档修复不能调用模型'));
+  getHandler('CHECK')(engine.context(), { head: '侦查', opts: {} });
+  const [pending] = engine.pendingRolls();
+  pc.hp.current = 0;
+  state.rollBatch = [{ pendingId: pending.id }];
+  state.keeperContinuation = {};
+
+  const loaded = createInitialState();
+  applySnapshot(loaded, storedSnapshot(state));
+  const reload = createEngine(loaded, () => assert.fail('读档修复不能调用模型'));
+  assert.equal(reload.reconcileParty(), true);
+  assert.equal(reload.reconcileParty(), false);
+  assert.equal(loaded.scenario.ended, true);
+  assert.equal(loaded.rollBatch, null);
+  assert.equal(loaded.keeperContinuation, null);
+  assert.equal(loaded.messages.filter((m) => m.role === 'scene').length, 1);
+  assert.equal(loaded.messages.find((m) => m.data?.id === pending.id).data.status, 'cancelled');
+});
+
+test('联机省略受伤者时结算给实际行动者，倒下后禁止该客人发送行动', async () => {
+  const state = createInitialState();
+  const host = state.playerChar = createCharacter({ name: '房主', isPlayer: true });
+  const guest = createCharacter({ name: '客人' });
+  guest.hp.current = 2;
+  state.teammates = [guest];
+  state.net.role = 'host';
+  state.net.players = [{ id: 'p1', charId: guest.id }];
+  const replies = ['[[DAMAGE:2]]', '房主扶住了客人。'];
+  const engine = createEngine(state, async () => ({ ok: true, text: replies.shift() }));
+  engine.rollOwner = (ch) => rollOwner(state, ch);
+  assert.equal((await engine.takeTurn('调查过道', { actorId: guest.id })).ok, true);
+  assert.equal(host.hp.current, host.hp.max);
+  assert.equal(guest.hp.current, 0);
+  assert.equal((await engine.takeTurn('继续调查', { actorId: guest.id })).ok, false);
+  assert.equal(state.scenario.ended, false);
+  assert.equal(publicRoomState(state, { ready: true, busy: false }).teammates[0].hp.current, 0);
+});
+
+test('已经失败的模型请求可在读档后重试同一行动一次', async () => {
+  const state = createInitialState();
+  state.playerChar = createCharacter({ name: '林默', isPlayer: true });
+  const first = createEngine(state, async () => ({ ok: false, error: '网络中断' }));
+  assert.equal((await first.takeTurn('查看石门')).ok, false);
+  assert.equal(turnCount(state), 0);
+
+  const loaded = createInitialState();
+  const saved = storedSnapshot(state);
+  assert.equal(saved.meta.turns, 0);
+  applySnapshot(loaded, saved);
+  const retry = createEngine(loaded, async ({ messages }) => {
+    assert.equal(messages.filter((m) => m.content === '查看石门').length, 1);
+    return { ok: true, text: '石门上刻着一个图案。' };
+  });
+  assert.equal((await retry.takeTurn('')).ok, true);
+  assert.equal(loaded.turns, 1);
+  assert.equal(loaded.messages.filter((m) => m.role === 'user').length, 1);
+  assert.equal(loaded.keeperContinuation, null);
+});
+
+test('超大骰池和不完整骰式被拒绝，属性及幸运用当前值', () => {
+  assert.equal(rollDice('1000000d6').invalid, true);
+  assert.equal(rollDice('2d0').invalid, true);
+  assert.equal(rollDice('2d6d6').invalid, true);
+  assert.equal(rollDice('2d6+').invalid, true);
+  assert.equal(rollDice('2d6 - 1').invalid, undefined);
+  assert.equal(rollD100({ bonus: Number.MAX_VALUE }).candidates.length, 3);
+  const ch = createCharacter({ name: '林默' });
+  ch.attrs.CON = 63;
+  ch.luck.current = 24;
+  assert.equal(resolveSkillValue(ch, '体质'), 63);
+  assert.equal(resolveSkillValue(ch, 'con'), 63);
+  assert.equal(resolveSkillValue(ch, '幸运'), 24);
+});
+
+test('队友 AI 无法直接改血量、场景或结局，只能请求自身检定', async () => {
+  const state = createInitialState();
+  const fallen = createCharacter({ name: '倒下' });
+  fallen.hp.current = 0;
+  const active = createCharacter({ name: '医师' });
+  state.teammates = [fallen, active];
+  const api = { chat: async () => ({ ok: true, text: '查看四周。[[HP:+10]][[END:结束]][[SCENE:外面]][[CHECK:侦查|角色=倒下]]' }) };
+  assert.deepEqual(pickActingTeammates(state, { chance: 1 }), [active]);
+  assert.equal((await generateTeammateAction(state, api, fallen)).ok, false);
+  const plan = await generateTeammateAction(state, api, active);
+  assert.equal(plan.directives.length, 1);
+  assert.equal(plan.directives[0].type, 'CHECK');
+  assert.equal(plan.directives[0].actorId, active.id);
+  assert.equal(plan.directives[0].opts['角色'], active.name);
+});
 
 test('理智阈值、INT 发作和技能难度使用各自的数值', () => {
   const ch = createCharacter({ name: '林默' });

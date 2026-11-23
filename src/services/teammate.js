@@ -4,14 +4,16 @@
 // ---------------------------------------------------------------------------
 import { characterToPrompt } from '../core/character.js';
 import { teammateSystemPrompt } from '../core/prompts.js';
+import { incapacity } from '../core/vitals.js';
+import { stripDirectivesForDisplay } from '../shared/text.js';
 
 /**
  * 随机挑一位队友，生成一句符合人设的反应。
  * @returns { ok, name?, text?, error? }
  */
 export async function generateTeammateLine(state, api) {
-  const teammates = state.teammates || [];
-  if (!teammates.length) return { ok: false, error: '还没有队友' };
+  const teammates = (state.teammates || []).filter((character) => !incapacity(character));
+  if (state.scenario?.ended || !teammates.length) return { ok: false, error: '当前没有能插话的队友' };
 
   const t = teammates[Math.floor(Math.random() * teammates.length)];
 
@@ -67,7 +69,7 @@ export async function generateTeammateLine(state, api) {
 
   if (!res.ok) return { ok: false, error: res.error };
 
-  const text = (res.text || '').trim().replace(/^[「『"]|[」』"]$/g, '');
+  const text = stripDirectivesForDisplay(res.text || '').trim().replace(/^[「『"]|[」』"]$/g, '');
   if (!text) return { ok: false, error: '队友没有给出回应' };
 
   return { ok: true, name: t.name, text };

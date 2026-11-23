@@ -8,6 +8,12 @@ import { parseArgs, promisify } from 'node:util';
 
 const UPLOAD_TIMEOUT_SECONDS = 900;
 
+export function isReleaseTag(tag, version) {
+  const prefix = `v${version}-fix`;
+  return typeof tag === 'string' && (tag === `v${version.replace(/\.0$/, '')}` ||
+    (tag.startsWith(prefix) && /^[1-9]\d*$/.test(tag.slice(prefix.length))));
+}
+
 export async function publishRelease({ repo, tag, commit, notes, assetName, data, token }, fetcher = fetch, sendAsset) {
   const url = `https://api.github.com/repos/${repo}/releases`;
   const headers = {
@@ -123,13 +129,12 @@ async function main() {
   const { repo, tag, commit } = values;
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-  const prefix = `v${pkg.version}-fix`;
 
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo || '') || !/^[a-f\d]{40}$/.test(commit || '')) {
     throw new Error('请提供有效的 --repo 和 --commit。');
   }
-  if (!tag?.startsWith(prefix) || !/^[1-9]\d*$/.test(tag.slice(prefix.length))) {
-    throw new Error(`--tag 应使用 ${prefix}<编号>。`);
+  if (!isReleaseTag(tag, pkg.version)) {
+    throw new Error(`--tag 必须对应 package.json 版本 ${pkg.version} 的基础版本或修订编号。`);
   }
   const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
   if (!token) throw new Error('缺少 GH_TOKEN 或 GITHUB_TOKEN。');

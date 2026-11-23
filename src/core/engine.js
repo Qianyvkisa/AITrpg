@@ -9,7 +9,8 @@
 import { parseDirectives, splitNarration } from './protocol.js';
 import { keeperSystemPrompt } from './prompts.js';
 import { characterToPrompt } from './character.js';
-import { getHandler, summarizeResults, rollPending } from './directives.js';
+import { cancelPendingRoll, getHandler, pendingCharacter, rollBlocker, rollPending, summarizeResults, waitsForWoundCheck } from './directives.js';
+import { incapacity, partyEnding } from './vitals.js';
 import { compactHistory, DEFAULT_HISTORY_BUDGET } from './contextBudget.js';
 import { rememberInvestigation, selectInvestigation, selectModuleText } from './investigation.js';
 
@@ -127,7 +128,7 @@ export class GameEngine {
       teammates,
       companions,
       tone: s.tone,
-      mode: s.mode || 'player',
+      mode: s.mode === 'spectator' || (!investigator && incapacity(s.playerChar)) ? 'spectator' : 'player',
       // 自主模式下 KP 不代演队友，提示词要相应改写（否则两边打架）
       teammateAutonomous: s.teammateAutonomous !== false
     });
@@ -203,16 +204,18 @@ export class GameEngine {
    */
   async playerAction(text, opts = {}) {
     if (!text.trim()) return;
-    this.state.turnActorId = opts.actorId || '';
+    this.state.turnActorId = opts.actorId || (opts.hidden ? '' : this.state.playerChar?.id) || '';
     this.pushMessage(opts.hidden ? { role: 'user', text, hidden: true } : { role: 'user', text });
     // 场景事件记录同理：自动推进不记成「玩家做了什么」，
     // 否则场景摘要里会堆满「玩家：继续推进剧情」这种无信息量的条目。
     if (!opts.hidden) this.state.scenario.events.push(`玩家：${text.slice(0, 60)}`);
+    this.state.keeperContinuation = { retryAction: true };
     return this.runKeeper();
   }
 
   async runKeeper() {
     const s = this.state;
+    if (s.scenario.ended) return false;
     const rid = ++this.requestId;
 
     // 先构建上下文，再把占位消息放进历史，
@@ -298,10 +301,17 @@ export class GameEngine {
     const results = [];
 
     for (const d of directives) {
+      if (this.state.scenario.ended) break;
       const handler = getHandler(d.type);
       if (!handler) continue;
       try {
-        results.push(handler(this.context(), d));
+        const result = handler(this.context(), d);
+        if (result?.followUp) {
+          const { followUp, ...damage } = result;
+          results.push(damage, followUp);
+        } else {
+          results.push(result);
+        }
       } catch (e) {
         results.push({ text: `【系统】指令 ${d.type} 结算失败：${e.message}`, kind: 'error' });
       }
@@ -310,6 +320,7 @@ export class GameEngine {
     // 有待玩家掷骰的检定时，先不把结果回喂给 KP。
     // 否则 KP 会在玩家还没掷骰时就「叙述」一个还没发生的结果，
     // 造成叙事和真实骰点对不上。等玩家掷完再由 rollAndResume 续跑。
+    this.reconcileParty({ settleBatch: false });
     const pending = this.pendingRolls();
     if (pending.length) {
       this.state.rollBatch = results.filter(Boolean).map((result) => result.status === 'pending'
@@ -321,7 +332,7 @@ export class GameEngine {
     }
 
     const feedback = this.feedBackResults(results);
-    if (!this.state.scenario.ended && results.some((r) => r?.status === 'rolled' || r?.kind === 'damage')) {
+    if (!this.state.scenario.ended && results.some((r) => r?.status === 'rolled' || (r?.kind === 'damage' && r.dmg > 0))) {
       this.state.keeperContinuation = { feedbackId: feedback?.id };
     }
     this.emit({ type: 'state-changed' });
@@ -342,14 +353,54 @@ export class GameEngine {
       .map((m) => m.data);
   }
 
+  /** 终局和读档共用同一套清理逻辑，过期的掷骰不能锁住后续行动。 */
+  reconcileParty({ settleBatch = true } = {}) {
+    const s = this.state;
+    const context = this.context();
+    const ending = !s.scenario.ended && partyEnding(s);
+    if (ending) getHandler('END')(context, { head: ending });
+
+    const cancelled = [];
+    for (const message of s.messages) {
+      const roll = message.data;
+      if (message.role !== 'roll' || roll?.status !== 'pending') continue;
+      roll.messageId ??= message.id;
+      const reason = s.scenario.ended ? '调查已经结束' : rollBlocker(pendingCharacter(context, roll), roll);
+      if (reason) cancelled.push(cancelPendingRoll(context, roll, reason));
+    }
+
+    s.awaitingRoll = this.pendingRolls().length > 0;
+    const staleEnd = s.scenario.ended && (s.rollBatch || s.keeperContinuation);
+    if (s.scenario.ended) {
+      s.rollBatch = null;
+      s.keeperContinuation = null;
+    } else if (cancelled.length && s.rollBatch) {
+      for (const roll of cancelled) {
+        const entry = s.rollBatch.find(({ pendingId }) => pendingId === roll.id);
+        if (entry) entry.result = roll;
+      }
+    }
+    if (settleBatch && !s.awaitingRoll && !s.scenario.ended) this.finishRollBatch();
+    return !!(ending || cancelled.length || staleEnd);
+  }
+
+  finishRollBatch() {
+    const s = this.state;
+    if (!s.rollBatch) return;
+    const feedback = this.feedBackResults(s.rollBatch.map((item) => item.result));
+    s.rollBatch = null;
+    s.keeperContinuation = { feedbackId: feedback?.id };
+  }
+
   /**
    * 玩家点「掷骰」后调用：掷骰、结算、把结果回喂 KP 并续跑叙述。
    * @param {string} pendingId 待掷骰的 id
    */
   async rollAndResume(pendingId) {
+    this.reconcileParty();
     const pending = this.pendingRolls();
     const target = pending.find((p) => p.id === pendingId);
-    if (!target) return null;
+    if (!target || waitsForWoundCheck(target, pending)) return null;
 
     const s = this.state;
     // 旧存档的待掷骰没有批次信息，仍可继续结算。
@@ -368,12 +419,8 @@ export class GameEngine {
     if (entry) entry.result = r;
     else s.rollBatch.push({ result: r });
 
-    s.awaitingRoll = this.pendingRolls().length > 0;
-    if (!s.awaitingRoll) {
-      const feedback = this.feedBackResults(s.rollBatch.map((item) => item.result));
-      s.rollBatch = null;
-      s.keeperContinuation = s.scenario.ended ? null : { feedbackId: feedback?.id };
-    }
+    this.reconcileParty({ settleBatch: false });
+    if (!s.awaitingRoll && !s.scenario.ended) this.finishRollBatch();
     this.emit({ type: 'state-changed' });
 
     if (s.keeperContinuation) await this.resumeKeeper();
@@ -383,6 +430,7 @@ export class GameEngine {
 
   /** 先落盘结算，再续写。失败时保留续写标记供下次重试。 */
   async resumeKeeper() {
+    if (this.state.scenario.ended) return { chain: 0, ok: false, error: '本次调查已结束。' };
     let chain = 0;
     while (this.state.keeperContinuation && !this.pendingRolls().length && chain < MAX_CHAIN) {
       await this.checkpoint?.();
@@ -435,13 +483,28 @@ export class GameEngine {
    * 就叙述一个虚构的结果。玩家掷完骰后由 rollAndResume 接着跑。
    */
   async takeTurn(text, opts = {}) {
-    if (this.state.keeperContinuation) return this.resumeKeeper();
+    this.reconcileParty();
+    const s = this.state;
+    if (s.scenario.ended) return { chain: 0, ok: false, error: '本次调查已结束。' };
     if (this.pendingRolls().length) return { chain: 0, ok: false, error: '请先完成待掷骰。' };
-    const firstOk = await this.playerAction(text, opts);
+    const retry = s.keeperContinuation;
+    if (retry && !retry.retryAction) return this.resumeKeeper();
+    const actor = opts.actorId ? this.findCharById(opts.actorId) : s.playerChar;
+    const blocked = incapacity(actor);
+    if (!retry && ((opts.actorId && !actor) || (blocked && (opts.actorId || !opts.hidden)))) {
+      return { chain: 0, ok: false, error: blocked ? `${actor.name}（${blocked}）无法行动。` : '找不到行动中的调查员。' };
+    }
+    if (!retry && !text.trim()) return { chain: 0, ok: false, error: '请输入调查行动。' };
+    const firstOk = retry ? await this.runKeeper() : await this.playerAction(text, opts);
     if (firstOk === false) return { chain: 0, ok: false, error: this.lastError };
+    s.turns = (Number(s.turns) || 0) + 1;
+    if (s.scenario.ended) return { chain: 0, ok: true, error: '' };
     const result = await this.resumeKeeper();
     if (!result.ok || this.pendingRolls().length || this.state.scenario.ended) return result;
     await this.runTeammateActions();
+    if (s.keeperContinuation && !s.awaitingRoll) {
+      return { chain: result.chain, ok: false, error: this.lastError || '队友行动尚未完成续写。' };
+    }
     if (!this.pendingRolls().length && !this.state.keeperContinuation) await this.autoTeammateChatter();
     return result;
   }
@@ -484,6 +547,8 @@ export class GameEngine {
 
     for (const plan of plans) {
       if (!plan?.ok) continue;
+      const performer = plan.charId ? this.findCharById(plan.charId) : this.findChar(plan.name);
+      if (incapacity(performer)) continue;
 
       // 行动消息通常已由注入方推送过了（因为它要让后续队友看到前面的行动，
       // 必须边生成边落进消息流）。只有没推过的才在这里补推，避免出现两条一样的。
@@ -493,8 +558,8 @@ export class GameEngine {
           name: plan.name,
           text: plan.text
         });
-        s.scenario.events.push(`队友·${plan.name}：${String(plan.text).slice(0, 60)}`);
       }
+      s.scenario.events.push(`队友·${plan.name}：${String(plan.text).slice(0, 60)}`);
       anyActed = true;
 
       // 结算它请求的检定。指令里的角色名已在生成阶段补好，
@@ -505,7 +570,7 @@ export class GameEngine {
 
       // 出现待玩家掷骰就停下，别继续推进——否则后面的队友行动
       // 会建立在一个还没掷出的骰点之上
-      if (this.pendingRolls().length) {
+      if (s.scenario.ended || this.pendingRolls().length) {
         this.emit({ type: 'state-changed' });
         break;
       }
@@ -536,8 +601,7 @@ export class GameEngine {
     const speaker = this.teammateSpeaker;
     if (!speaker) return;
 
-    const teammates = s.teammates || [];
-    if (!teammates.length) return;
+    if (!(s.teammates || []).some((character) => !incapacity(character) && !this.rollOwner?.(character))) return;
 
     // 设置里关掉了就不说
     if (s.autoTeammate === false) return;

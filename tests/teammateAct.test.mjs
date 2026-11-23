@@ -168,7 +168,7 @@ console.log('\n== 旁观模式提示词不能与自主模式自相矛盾 ==');
     teammates: ['调查员：郑野'], companions: [], tone: '经典恐怖', mode: 'spectator',
     teammateAutonomous: false
   });
-  ok(legacy.includes('所有调查员都由你（KP）来驱动'), '代演模式保留旧说法');
+  ok(legacy.includes('由你驱动能行动的 NPC 调查员'), '代演模式由 KP 驱动可行动的角色');
 }
 
 // ---------------------------------------------------------------------------

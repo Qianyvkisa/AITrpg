@@ -400,12 +400,7 @@ body::before {
 }
 .char-card:hover { border-color: var(--accent-soft); background: var(--bg-raised); }
 .char-card.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .2); }
-.char-card.dead { opacity: .45; }
-.char-card.dead::after {
-  content: '已死亡';
-  position: absolute; top: 8px; right: 10px;
-  font-size: 10px; color: var(--danger); letter-spacing: 1px;
-}
+.char-card.down, .teammate-card.down { border-color: var(--danger); }
 
 .cc-name {
   font-family: var(--font-serif);

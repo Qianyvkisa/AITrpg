@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { publishRelease } from '../tools/publish-release.mjs';
+import { isReleaseTag, publishRelease } from '../tools/publish-release.mjs';
+
+test('基础版本使用简短标签，原有 fix 格式仍可用', () => {
+  assert.equal(isReleaseTag('v0.5', '0.5.0'), true);
+  assert.equal(isReleaseTag('v0.5.0-fix1', '0.5.0'), true);
+  assert.equal(isReleaseTag('v0.4.1', '0.4.1'), true);
+  assert.equal(isReleaseTag('v0.4.1-fix6', '0.5.0'), false);
+  assert.equal(isReleaseTag('v0.5.0-fix0', '0.5.0'), false);
+});
 
 const options = {
   repo: 'test/keeper', tag: 'v0.4.1-fix2', commit: 'a'.repeat(40), notes: '修复检定结算',

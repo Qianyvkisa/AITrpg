@@ -17,6 +17,7 @@
 // ---------------------------------------------------------------------------
 import { characterToPrompt } from '../core/character.js';
 import { teammateActionPrompt } from '../core/prompts.js';
+import { incapacity } from '../core/vitals.js';
 import { parseDirectives } from '../core/protocol.js';
 
 /** 最近现场取多少条消息喂给队友 AI，控制 token */
@@ -81,6 +82,7 @@ export function stampActorIntoDirectives(text, name) {
 export async function generateTeammateAction(state, api, char, opts = {}) {
   const teammates = state.teammates || [];
   if (!char) return { ok: false, error: '没有指定队友' };
+  if (state.scenario?.ended || incapacity(char)) return { ok: false, error: '当前队友无法行动' };
 
   const party = [
     state.playerChar ? characterToPrompt(state.playerChar) : '',
@@ -127,12 +129,14 @@ export async function generateTeammateAction(state, api, char, opts = {}) {
   return {
     ok: true,
     name: char.name,
+    charId: char.id,
     text: actionText,
     // 指令已补上角色名，可以直接交给 directives 结算
-    directives: directives.map((d) => ({
-      ...d,
-      opts: { ...d.opts, 角色: char.name }
-    })),
+    directives: directives.filter((d) => d.type === 'CHECK').map((d) => {
+      const opts = { ...d.opts, 角色: char.name };
+      delete opts['用途'];
+      return { ...d, actorId: char.id, opts };
+    }),
     raw
   };
 }
@@ -146,7 +150,7 @@ export async function generateTeammateAction(state, api, char, opts = {}) {
  * @returns {Array<object>} 要行动的队友列表
  */
 export function pickActingTeammates(state, { chance } = {}) {
-  const teammates = state.teammates || [];
+  const teammates = (state.teammates || []).filter((character) => !incapacity(character));
   if (!teammates.length) return [];
 
   // 总开关关掉 → 全部不行动（退回 KP 代演）

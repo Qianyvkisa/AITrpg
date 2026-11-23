@@ -114,7 +114,7 @@ export function describeCheck(c) {
 }
 
 /** 构造检定结果回喂给 AI 的文本 */
-export function formatCheckResult({ who, skill, difficulty, adjusted, roll, level, passed = level.ok }) {
+export function formatCheckResult({ who, skill, difficulty, adjusted, roll, level, passed = level.ok, outcome }) {
   const lines = [
     `【检定结果】${who} · ${skill}${difficulty !== '常规' ? `（${difficulty}）` : ''}`,
     `目标值 ${adjusted}，掷骰 ${roll.value}${roll.bonusPenaltyLabel ? ' ' + roll.bonusPenaltyLabel : ''} → ${level.label}`
@@ -122,6 +122,7 @@ export function formatCheckResult({ who, skill, difficulty, adjusted, roll, leve
   if (!passed && level.ok) lines.push('※ 未达到要求的成功等级，本次检定未通过。');
   if (level.level === 'critical') lines.push('※ 大成功：应给予额外线索或超预期效果');
   if (level.level === 'fumble') lines.push('※ 大失败：应加入额外恶果');
+  if (outcome) lines.push(outcome);
   return lines.join('\n');
 }
 

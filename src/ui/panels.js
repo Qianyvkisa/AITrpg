@@ -8,6 +8,8 @@
 // 会让整页反复重排，这是界面卡顿的第二个来源。
 // ---------------------------------------------------------------------------
 import { ATTRS } from '../core/character.js';
+import { incapacity } from '../core/vitals.js';
+import { turnCount } from '../persistence.js';
 import { escapeHtml } from '../shared/text.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -51,13 +53,18 @@ export function barHtml(label, cur, max, cls) {
 
 export function renderScene(state) {
   setText('#sceneName', state.scenario.scene || '尚未开始');
-  // 轮数取两个来源的较大值：
-  //   玩家模式靠 user 消息条数（每轮一条行动）
-  //   旁观模式没有 user 消息，只能靠 state.turns 显式计数
-  // 原来只数 user 消息，导致旁观模式跑了几十轮，右上角始终是空的。
-  const fromMessages = state.messages.filter((m) => m.role === 'user').length;
-  const turns = Math.max(fromMessages, Number(state.turns) || 0);
+  const turns = turnCount(state);
   setText('#turnCounter', turns ? `第 ${turns} 轮` : '');
+}
+
+function statusLabels(character) {
+  const labels = new Set(character.status || []);
+  const condition = incapacity(character);
+  if (condition) labels.add(condition);
+  if (!labels.size) return '';
+  const chips = [...labels].map((label) =>
+    `<span class="status-chip ${/疯狂/.test(label) ? 'san' : ''}">${escapeHtml(label)}</span>`);
+  return `<div class="char-status">${chips.join('')}</div>`;
 }
 
 export function renderCharList(state) {
@@ -73,11 +80,11 @@ export function renderCharList(state) {
     return;
   }
 
-  const dead = ch.hp.current <= 0;
+  const down = !!incapacity(ch);
   const changed = setHtml(
     '#charList',
     `
-    <div class="char-card active${dead ? ' dead' : ''}">
+    <div class="char-card active${down ? ' down' : ''}">
       <div class="cc-name">
         ${escapeHtml(ch.name)}
         <span class="tag player">PC</span>
@@ -85,7 +92,7 @@ export function renderCharList(state) {
       ${barHtml('HP', ch.hp.current, ch.hp.max, 'hp')}
       ${barHtml('SAN', ch.san.current, ch.san.temp, 'san')}
       ${barHtml('MP', ch.mp.current, ch.mp.max, 'mp')}
-      ${ch.status.length ? `<div class="char-status">${ch.status.map((s) => `<span class="status-chip ${/疯狂/.test(s) ? 'san' : ''}">${escapeHtml(s)}</span>`).join('')}</div>` : ''}
+      ${statusLabels(ch)}
     </div>`
   );
 
@@ -113,10 +120,11 @@ export function renderTeammateList(state) {
     state.teammates
       .map(
         (t, i) => `
-      <div class="teammate-card">
+      <div class="teammate-card${incapacity(t) ? ' down' : ''}">
         <div class="tm-info">
           <div class="tm-name">${escapeHtml(t.name)}</div>
           <div class="tm-role">${escapeHtml(t.occupation || '调查员')} · HP ${t.hp.current} SAN ${t.san.current}</div>
+          ${statusLabels(t)}
         </div>
         ${listLocked ? '' : `<button class="icon-btn" data-tm-index="${i}" title="移除队友">×</button>`}
       </div>`
@@ -202,7 +210,9 @@ export function renderRollLog(state) {
         const time = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
         const lvl = m.data?.level?.level;
         const cls = lvl === 'critical' ? 'crit' : lvl === 'fumble' ? 'fumb' : '';
-        const label = m.data?.passed === false && m.data?.level?.ok ? '未通过' : m.data?.level?.label || '';
+        const label = m.data?.status === 'cancelled' ? '已取消'
+          : m.data?.status === 'pending' ? '待掷骰'
+          : m.data?.passed === false && m.data?.level?.ok ? '未通过' : m.data?.level?.label || '';
         const val = m.data?.roll?.value ?? m.data?.sanRoll?.value ?? m.data?.powRoll?.value ?? m.data?.dmg ?? '';
         const who = escapeHtml(m.data?.who || '');
         const what = escapeHtml(m.data?.skill || m.data?.kind || '');

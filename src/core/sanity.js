@@ -97,7 +97,9 @@ export const PHOBIAS = [
 /** SAN 归零 → 永久疯狂 */
 export function checkInsanity(ch) {
   if (ch.san.current <= 0) {
-    ch.status.push('永久疯狂');
+    const status = ch.status ??= [];
+    if (status.includes('永久疯狂')) return { insane: true, note: '' };
+    status.push('永久疯狂');
     return { insane: true, note: '理智归零，角色永久疯狂，交由 KP 接管或退役。' };
   }
   if (ch.san.current <= 20 && !ch.status.includes('濒临疯狂')) {

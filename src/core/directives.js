@@ -8,6 +8,8 @@
 import { rollD100, rollDice, successLevel, expandDb } from './dice.js';
 import { difficultyToSkill, formatCheckResult, formatSanResult } from './protocol.js';
 import { applySanCheck, checkInsanity } from './sanity.js';
+import { ATTRS } from './character.js';
+import { applyDamage, incapacity, markDead, recoverHp } from './vitals.js';
 
 const handlers = new Map();
 
@@ -21,13 +23,6 @@ export function getHandler(type) {
 
 export function handledTypes() {
   return [...handlers.keys()];
-}
-
-/** 取指令里指定的角色，缺省落到玩家角色 */
-function targetChar(ctx, d) {
-  const who = d.opts['角色'] || ctx.state.playerChar?.name;
-  if (!who) return null;
-  return ctx.findChar(who);
 }
 
 /**
@@ -62,11 +57,13 @@ const SKILL_ALIASES = {
  * @returns {number|undefined} 找不到返回 undefined
  */
 export function resolveSkillValue(ch, rawName) {
-  const skills = ch?.skills;
-  if (!skills) return undefined;
-
   const name = String(rawName || '').trim();
   if (!name) return undefined;
+  if (name === '幸运' || name.toUpperCase() === 'LUCK') return ch?.luck?.current;
+  const attribute = ATTRS.find(({ key, name: label }) => key === name.toUpperCase() || label === name);
+  if (attribute) return ch?.attrs?.[attribute.key];
+  const skills = ch?.skills;
+  if (!skills) return undefined;
 
   // 1) 原名直接命中
   if (skills[name] !== undefined) return skills[name];
@@ -131,25 +128,58 @@ function isPlayerChar(ctx, ch) {
  * 把一个检定登记为「等待玩家掷骰」。
  * @returns {object} 与原来 CHECK 返回值同形的占位结果
  */
-function deferCheck(ctx, { who, charId, skillName, difficulty, base, adjusted, bonus, penalty, reason, ownerId }) {
+function deferCheck(ctx, params) {
+  const { who, skill, difficulty, adjusted, reason } = params;
   const pending = {
+    ...params,
     id: 'roll-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
-    kind: 'check',
-    who, charId, skill: skillName, difficulty,
-    baseSkill: base ?? 5, adjusted,
-    bonus, penalty, reason,
-    status: 'pending', ownerId
   };
 
   const msg = ctx.pushMessage({
     role: 'roll',
-    text: `【待掷骰】${who} · ${skillName}${difficulty !== '常规' ? `（${difficulty}）` : ''}　目标值 ${adjusted}${reason ? '：' + reason : ''}`,
+    text: `【待掷骰】${who} · ${skill}${difficulty !== '常规' ? `（${difficulty}）` : ''}　目标值 ${adjusted}${reason ? '：' + reason : ''}`,
     data: pending
   });
 
   // 记录到消息上，玩家点按钮后要按这条消息回填结果
   pending.messageId = msg.id;
   return pending;
+}
+
+function requestCheck(ctx, ch, { skill, baseSkill, difficulty = '常规', bonus = 0, penalty = 0, reason = '', effect }) {
+  const pending = {
+    kind: 'check', who: ch.name, charId: ch.id, skill, baseSkill, difficulty,
+    adjusted: difficultyToSkill(baseSkill, difficulty), bonus, penalty, reason, effect,
+    status: 'pending', ownerId: ctx.rollOwner?.(ch)
+  };
+  if (isPlayerChar(ctx, ch)) return deferCheck(ctx, pending);
+  const result = rollPending(ctx, pending);
+  if (result) ctx.pushMessage({ role: 'roll', text: result.text || formatCheckResult(result), data: result });
+  return result;
+}
+
+export function pendingCharacter(ctx, roll) {
+  if (roll.charId && ctx.findCharById) return ctx.findCharById(roll.charId);
+  return ctx.findChar(roll.who);
+}
+
+export function rollBlocker(character, roll) {
+  if (!character) return '角色已不在调查队';
+  const condition = incapacity(character);
+  if (roll.effect === 'dying') return condition === '濒死' ? '' : '已无需濒死检定';
+  return condition ? `角色处于${condition}状态` : '';
+}
+
+export function waitsForWoundCheck(roll, pending) {
+  return !roll.effect && pending.some((other) => other.effect === 'major-wound' &&
+    (roll.charId && other.charId ? roll.charId === other.charId : roll.who === other.who));
+}
+
+export function cancelPendingRoll(ctx, roll, reason) {
+  roll.status = 'cancelled';
+  roll.text = `【检定取消】${roll.who} · ${roll.skill || '理智检定'}（${reason}）`;
+  if (roll.messageId) ctx.updateMessage(roll.messageId, { text: roll.text, data: roll, pending: false });
+  return roll;
 }
 
 /**
@@ -159,8 +189,9 @@ function deferCheck(ctx, { who, charId, skillName, difficulty, base, adjusted, b
 export function rollPending(ctx, pending) {
   if (!pending || pending.status !== 'pending') return null;
 
-  const ch = ctx.findCharById?.(pending.charId) || ctx.findChar(pending.who);
-  if (!ch) return null;
+  const ch = pendingCharacter(ctx, pending);
+  const blocked = rollBlocker(ch, pending);
+  if (blocked) return cancelPendingRoll(ctx, pending, blocked);
 
   pending.status = 'rolled';
 
@@ -177,6 +208,14 @@ export function rollPending(ctx, pending) {
       // 结果对象自带 status，回填到消息后界面据此判断不再显示「掷骰」按钮
       status: 'rolled'
     };
+    if (!passed && pending.effect === 'major-wound') {
+      const status = ch.status ??= [];
+      if (!status.includes('昏迷')) status.push('昏迷');
+      r.outcome = '重伤体质检定失败，陷入昏迷。';
+    } else if (!passed && pending.effect === 'dying') {
+      markDead(ch);
+      r.outcome = '濒死体质检定失败，角色死亡。';
+    }
     pending.result = r;
 
     // 只有玩家手动掷骰才有占位消息可回填；自动掷骰时 messageId 为空
@@ -260,6 +299,7 @@ export function rollPending(ctx, pending) {
  * @returns {{who: string, ch: object|null}}
  */
 function pickActor(ctx, d) {
+  if (d.actorId && ctx.findCharById) return { who: d.opts['角色'], ch: ctx.findCharById(d.actorId) };
   const explicit = d.opts['角色'];
   if (explicit) {
     return { who: explicit, ch: ctx.findChar(explicit) };
@@ -269,9 +309,10 @@ function pickActor(ctx, d) {
   if (active) return { who: active.name, ch: active };
 
   const player = ctx.state.playerChar;
-  if (player) return { who: player.name, ch: player };
+  if (player && (ctx.state.turnActorId || !incapacity(player))) return { who: player.name, ch: player };
 
-  const firstMate = (ctx.state.teammates || [])[0];
+  const teammates = ctx.state.teammates || [];
+  const firstMate = teammates.find((character) => !incapacity(character)) || player || teammates[0];
   if (firstMate) return { who: firstMate.name, ch: firstMate };
 
   // 一个人都没有（理论上的空局）：保留原文兜底，由调用方决定怎么处理
@@ -292,16 +333,15 @@ define('CHECK', (ctx, d) => {
   if (!ch) {
     return { text: `【系统】找不到角色「${who}」`, kind: 'error' };
   }
+  const dying = d.opts['用途'] === '濒死' && /^(?:体质|CON)$/i.test(skillName);
+  const effect = dying ? 'dying' : undefined;
+  const blocked = rollBlocker(ch, { effect });
+  if (blocked) return { kind: 'error', text: `【检定跳过】${who}：${blocked}` };
 
   const base = resolveSkillValue(ch, skillName);
-  const skillValue = base ?? 5;
-  const adjusted = difficultyToSkill(skillValue, difficulty);
-
   const bonus = Number(d.opts['奖励'] || 0);
   const penalty = Number(d.opts['惩罚'] || 0);
   const reason = d.opts['原因'] || '';
-
-  const params = { who, charId: ch.id, skillName, difficulty, base, adjusted, bonus, penalty, reason, ownerId: ctx.rollOwner?.(ch) };
 
   // 缺技能提示：无论手动还是自动都要告诉玩家
   if (base === undefined) {
@@ -311,18 +351,10 @@ define('CHECK', (ctx, d) => {
     });
   }
 
-  // 玩家角色 → 等待玩家亲自掷骰
-  if (isPlayerChar(ctx, ch)) {
-    return deferCheck(ctx, params);
-  }
-
-  // 队友 / NPC → 自动掷（走统一的结算函数）
-  const autoPending = { kind: 'check', who, charId: ch.id, skill: skillName, difficulty, baseSkill: skillValue, adjusted, bonus, penalty, reason, status: 'pending' };
-  const r = rollPending(ctx, autoPending);
-  if (r) {
-    ctx.pushMessage({ role: 'roll', text: formatCheckResult(r), data: r });
-  }
-  return r;
+  return requestCheck(ctx, ch, {
+    skill: skillName, baseSkill: base ?? 5, difficulty: dying ? '常规' : difficulty,
+    bonus: dying ? 0 : bonus, penalty: dying ? 0 : penalty, reason, effect
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -340,6 +372,8 @@ define('SAN', (ctx, d) => {
   if (!ch) {
     return { text: `【系统】找不到角色「${who}」`, kind: 'error' };
   }
+  const blocked = rollBlocker(ch, {});
+  if (blocked) return { kind: 'error', text: `【理智检定跳过】${who}：${blocked}` };
 
   const lossExpr = d.head;
   const reason = d.opts['原因'] || '';
@@ -373,75 +407,75 @@ define('SAN', (ctx, d) => {
 });
 
 // ---------------------------------------------------------------------------
-// DAMAGE —— 伤害结算（含伤害加值 db）
+// DAMAGE 和负 HP 使用同一套伤害结算。
 // ---------------------------------------------------------------------------
-define('DAMAGE', (ctx, d) => {
-  const who = d.opts['角色'] || ctx.state.playerChar?.name;
-  const ch = targetChar(ctx, d);
-  if (!ch) return null;
-
-  const expr = expandDb(d.head, ch.derived.db);
-  const rolled = rollDice(expr);
+function settleDamage(ctx, ch, rolled) {
+  const who = ch.name;
   const dmg = Math.max(0, rolled.total);
-  ch.hp.current = Math.max(0, ch.hp.current - dmg);
-
+  const before = ch.hp.current;
+  const { majorWound, outcome } = applyDamage(ch, dmg);
   const r = {
-    kind: 'damage',
-    who, expr, rolled, dmg,
-    hpAfter: ch.hp.current, hpMax: ch.hp.max
+    kind: 'damage', who, charId: ch.id, expr: rolled.expr, rolled, dmg, outcome,
+    hpAfter: ch.hp.current, hpMax: ch.hp.max, delta: ch.hp.current - before, majorWound
   };
-
   ctx.pushMessage({
     role: 'roll',
-    text: `【伤害】${who} 受到 ${dmg} 点伤害（${d.head} = ${rolled.total}）→ HP ${ch.hp.current}/${ch.hp.max}`,
+    text: `【伤害】${who} 受到 ${dmg} 点伤害（${rolled.expr} = ${rolled.total}）→ HP ${ch.hp.current}/${ch.hp.max}`,
     data: r
   });
-
-  // 重伤判定：单次伤害 ≥ 最大 HP 的一半
-  if (dmg >= Math.floor(ch.hp.max / 2) && ch.hp.current > 0) {
-    if (!ch.status.includes('重伤')) ch.status.push('重伤');
-    ctx.pushMessage({ role: 'system', text: `【重伤】${who} 受到致命打击，进入重伤状态，需要急救。` });
+  if (outcome) ctx.pushMessage({ role: 'system', text: `【${outcome}】${who} 已无法行动。` });
+  const con = ch.attrs?.CON;
+  if (majorWound && !incapacity(ch) && Number.isFinite(con)) {
+    const followUp = requestCheck(ctx, ch, { skill: '体质', baseSkill: con, reason: '重伤后保持清醒', effect: 'major-wound' });
+    return { ...r, followUp };
   }
-  if (ch.hp.current === 0) {
-    if (!ch.status.includes('濒死')) ch.status.push('濒死');
-    ctx.pushMessage({ role: 'system', text: `【濒死】${who} HP 归零，昏迷濒死。` });
-  }
-
   return r;
+}
+
+define('DAMAGE', (ctx, d) => {
+  const { who, ch } = pickActor(ctx, d);
+  if (!ch) return { kind: 'error', text: `【伤害未结算】找不到角色「${who}」` };
+  if (ch.status?.includes('死亡')) return { kind: 'error', text: `【伤害未结算】${who} 已死亡` };
+  const attacker = d.opts['攻击者'] ? ctx.findChar(d.opts['攻击者']) : null;
+  const rolled = rollDice(expandDb(d.head, attacker?.derived?.db));
+  if (rolled.invalid) return { kind: 'error', text: `【伤害未结算】无效骰式「${d.head}」` };
+  return settleDamage(ctx, ch, rolled);
 });
 
 // ---------------------------------------------------------------------------
 // HP / MP —— 直接增减
 // ---------------------------------------------------------------------------
-function defineDelta(type, field, label) {
+for (const type of ['HP', 'MP']) {
+  const field = type.toLowerCase();
   define(type, (ctx, d) => {
-    const who = d.opts['角色'] || ctx.state.playerChar?.name;
-    const ch = targetChar(ctx, d);
-    if (!ch) return null;
-
-    const delta = parseInt(d.head, 10) || 0;
+    const { who, ch } = pickActor(ctx, d);
+    if (!ch) return { kind: 'error', text: `【${type}未结算】找不到角色「${who}」` };
+    if (ch.status?.includes('死亡')) return { kind: 'error', text: `【${type}未结算】${who} 已死亡` };
+    if (!/^[+-]?\d+$/.test(d.head) || !Number.isSafeInteger(Number(d.head))) {
+      return { kind: 'error', text: `【${type}未结算】数值必须是整数` };
+    }
+    const requested = Number(d.head);
     const bar = ch[field];
-    bar.current = Math.max(0, Math.min(bar.max, bar.current + delta));
-
-    const r = { kind: type.toLowerCase(), who, delta, value: bar.current, max: bar.max };
-    ctx.pushMessage({
-      role: 'system',
-      text: `【${label}】${who} ${delta >= 0 ? '+' : ''}${delta} → ${bar.current}/${bar.max}`
-    });
-    return r;
+    const before = bar.current;
+    if (field === 'hp') {
+      if (requested < 0) return settleDamage(ctx, ch, rollDice(String(-requested)));
+      recoverHp(ch, requested);
+    } else {
+      bar.current = Math.max(0, Math.min(bar.max, before + requested));
+    }
+    const delta = bar.current - before;
+    const text = `【${type}】${who} ${delta >= 0 ? '+' : ''}${delta} → ${bar.current}/${bar.max}`;
+    ctx.pushMessage({ role: 'system', text });
+    return { kind: field, who, delta, value: bar.current, max: bar.max, text };
   });
 }
-
-defineDelta('HP', 'hp', 'HP');
-defineDelta('MP', 'mp', 'MP');
 
 // ---------------------------------------------------------------------------
 // ITEM —— 获得 / 失去物品
 // ---------------------------------------------------------------------------
 define('ITEM', (ctx, d) => {
-  const who = d.opts['角色'] || ctx.state.playerChar?.name;
-  const ch = targetChar(ctx, d);
-  if (!ch) return null;
+  const { who, ch } = pickActor(ctx, d);
+  if (!ch) return { kind: 'error', text: `【物品未结算】找不到角色「${who}」` };
 
   const gain = d.head.startsWith('+');
   const itemName = d.head.replace(/^[+-]/, '').trim();
@@ -465,7 +499,8 @@ function recordClue(ctx, d) {
   const clue = d.head;
   if (!clue) return null;
 
-  if (!ctx.state.scenario.clues.includes(clue)) ctx.state.scenario.clues.push(clue);
+  if (ctx.state.scenario.clues.includes(clue)) return { kind: 'clue', clue };
+  ctx.state.scenario.clues.push(clue);
   ctx.pushMessage({ role: 'clue', text: `【线索】${clue}` });
   return { kind: 'clue', clue };
 }
@@ -484,10 +519,11 @@ define('SCENE', (ctx, d) => {
 });
 
 define('END', (ctx, d) => {
+  if (ctx.state.scenario.ended) return null;
   ctx.state.scenario.ended = true;
-  ctx.state.scenario.ending = d.head;
-  ctx.pushMessage({ role: 'scene', text: `【模组结束】${d.head}` });
-  return { kind: 'end', ending: d.head };
+  const ending = ctx.state.scenario.ending = d.head || '本次调查结束。';
+  ctx.pushMessage({ role: 'scene', text: `【模组结束】${ending}` });
+  return { kind: 'end', ending };
 });
 
 // ---------------------------------------------------------------------------
@@ -497,9 +533,10 @@ export function summarizeResults(results) {
   const lines = results
     .filter(Boolean)
     .map((r) => {
+      if (r.status === 'cancelled') return r.text;
       if (r.kind === 'check') return formatCheckResult(r);
       if (r.kind === 'san') return formatSanResult(r);
-      if (r.kind === 'damage') return `【伤害】${r.who} 受到 ${r.dmg} 点伤害 → HP ${r.hpAfter}/${r.hpMax}`;
+      if (r.kind === 'damage') return `【伤害】${r.who} 受到 ${r.dmg} 点伤害 → HP ${r.hpAfter}/${r.hpMax}${r.outcome ? '，' + r.outcome : r.majorWound ? '，重伤' : ''}`;
       if (r.kind === 'clue' && r.clue) return `【线索】${r.clue}`;
       if (r.kind === 'scene') return `【场景】${r.scene}`;
       if (r.kind === 'end') return `【模组结束】${r.ending}`;
