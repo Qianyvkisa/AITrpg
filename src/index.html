@@ -173,6 +173,8 @@
         <textarea id="input" aria-label="调查行动" aria-describedby="composerHint" placeholder="你要做什么？（Enter 发送，Shift+Enter 换行）" rows="2"></textarea>
         <div class="composer-actions">
           <span id="composerHint" class="composer-hint"><kbd>Enter</kbd> 发送　<kbd>Shift + Enter</kbd> 换行</span>
+          <span id="narrationStatus" class="narration-status" hidden><span id="narrationPhase" role="status"></span><span id="narrationElapsed" aria-hidden="true"></span></span>
+          <button class="btn ghost" id="btnStopNarration" hidden>停止等待</button>
           <button class="btn ghost" id="btnAuto" title="让队友 AI 主动说一句话">队友插话</button>
           <button class="btn ghost" id="btnAutoAdvance" hidden
                   title="开启后，每轮 KP 叙述完自动继续推进，不需要手动点「推进」">自动推进</button>

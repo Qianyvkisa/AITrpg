@@ -232,8 +232,6 @@
 [data-theme="ritual"] .bar-fill.low { animation: none; }
 [data-theme="ritual"] .center-panel { background: rgb(27 23 16 / .88); }
 [data-theme="ritual"] .scene-bar {
-  position: relative;
-  isolation: isolate;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
   gap: 10px;
@@ -241,17 +239,6 @@
   padding-inline: clamp(14px, 2vw, 30px);
   background: var(--bg-bar);
   border-bottom-color: var(--border-strong);
-}
-[data-theme="ritual"] .scene-bar::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  inset: 0 0 0 auto;
-  width: min(100%, clamp(220px, 58%, 540px));
-  pointer-events: none;
-  background:
-    linear-gradient(90deg, var(--bg-bar), #201a12df 12%, #201a1252 56%, #201a126b),
-    url('assets/ritual/altar.webp') center / cover no-repeat;
 }
 [data-theme="ritual"] .scene-label {
   display: flex;

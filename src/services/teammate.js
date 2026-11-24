@@ -67,7 +67,7 @@ export async function generateTeammateLine(state, api) {
     ]
   });
 
-  if (!res.ok) return { ok: false, error: res.error };
+  if (!res.ok) return { ok: false, error: res.friendly || res.error, canceled: res.canceled };
 
   const text = stripDirectivesForDisplay(res.text || '').trim().replace(/^[「『"]|[」』"]$/g, '');
   if (!text) return { ok: false, error: '队友没有给出回应' };

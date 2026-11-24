@@ -511,6 +511,10 @@ function findStreamingMessage(id) {
 
 function handleEngineEvent(ev) {
   switch (ev.type) {
+    case 'narration-status':
+      updateNarrationStatus(ev.label, ev.stopping);
+      break;
+
     case 'message':
       renderMessage(ev.message);
       scrollToBottom();
@@ -695,7 +699,7 @@ async function init() {
     });
   });
 
-  initMessageScroll();
+  initMessageScroll(() => [...state.teammates, ...state.companions].map(character => character.name));
   bindUI();
   bindNetEvents();
   showStartScreen();
@@ -1028,6 +1032,10 @@ function bindUI() {
   });
 
   $('#btnSend').onclick = () => (state.mode === 'spectator' ? spectatorAdvance() : sendAction());
+  $('#btnStopNarration').onclick = () => {
+    stopAutoAdvance(null);
+    engine.cancelNarration().catch(error => console.error(error));
+  };
 
   // 自动推进开关（只在旁观模式可见，由 applyModeToComposer 控制）
   const autoAdvanceBtn = $('#btnAutoAdvance');
@@ -1239,6 +1247,28 @@ async function runPlayerTurn(text, opts) {
   }
 }
 
+let narrationClock = null;
+
+function updateNarrationStatus(label, stopping) {
+  const status = $('#narrationStatus');
+  const phase = $('#narrationPhase');
+  const elapsed = $('#narrationElapsed');
+  const stop = $('#btnStopNarration');
+  status.hidden = stop.hidden = !label;
+  stop.disabled = !!stopping;
+  phase.textContent = label;
+  if (!label) {
+    clearInterval(narrationClock);
+    narrationClock = null;
+    elapsed.textContent = '';
+  } else if (narrationClock === null) {
+    const started = Date.now();
+    narrationClock = setInterval(() => {
+      elapsed.textContent = ` · ${Math.floor((Date.now() - started) / 1000)} 秒`;
+    }, 1000);
+  }
+}
+
 /**
  * 编排这一轮有哪些队友自主行动。
  *
@@ -1261,17 +1291,27 @@ async function planTeammateActions() {
   const playerAction = lastUser?.text || '';
 
   const plans = [];
+  const recent = [];
+  const deadline = Date.now() + 12000;
 
   for (const char of acting) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
     // 前面的队友刚行动过，就提示这位别重复
-    const lastActor = state.messages.findLast((m) => m.role === 'teammate-action')?.name;
+    const messages = state.messages.concat(recent);
+    const lastActor = messages.findLast((m) => m.role === 'teammate-action')?.name;
 
-    const res = await generateTeammateAction(state, window.api, char, {
+    const api = { chat: payload => engine.requestNarration({
+      ...payload, timeoutMs: remaining, maxRetries: 0
+    }, `等待队友 ${char.name} 行动`) };
+    const res = await generateTeammateAction({ ...state, messages }, api, char, {
       playerAction,
       lastSpeaker: lastActor
     });
 
     if (!res.ok) {
+      if (res.canceled) return [];
+      if (res.timedOut) break;
       // 单个队友失败不该中断整轮：记录一条隐藏提示继续下一位
       engine.pushMessage({
         role: 'system',
@@ -1283,17 +1323,10 @@ async function planTeammateActions() {
 
     plans.push(res);
 
-    // 先把行动落进消息流，后面的队友才能看到（上面 buildRecentContext 读的是 state.messages）
-    engine.pushMessage({
-      role: 'teammate-action',
-      name: res.name,
-      text: res.text
-    });
+    recent.push({ role: 'teammate-action', name: res.name, text: res.text });
   }
 
-  // 这里返回的计划里，text 已经在上面推过消息了。
-  // 为避免引擎重复推送，标记已推送，由引擎跳过推送只做结算。
-  return plans.map((p) => ({ ...p, alreadyPushed: true }));
+  return plans;
 }
 
 /** 队友 AI 主动插话 */
@@ -1310,7 +1343,11 @@ async function teammateSpeak(opts = {}) {
   }
 
   try {
-    const res = await generateTeammateLine({ ...state, teammates }, window.api);
+    const api = { chat: payload => engine.requestNarration({
+      ...payload, maxRetries: 0
+    }, '等待队友插话') };
+    const res = await generateTeammateLine({ ...state, teammates }, api);
+    if (res.canceled) return;
     if (!res.ok) throw new Error(res.error);
     engine.pushMessage({ role: 'teammate', name: res.name, text: res.text });
     scrollToBottom();

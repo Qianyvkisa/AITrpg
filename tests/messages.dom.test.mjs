@@ -124,6 +124,17 @@ function blinking() {
 
 function reset() { root.children = []; }
 
+{
+  renderAllMessages([
+    { id: 'dialogue', role: 'keeper', text: '[[SAY: 白鹭 | 门里没人。]][[SAY: 管家 | 你们是谁？]]' },
+    { id: 'move', role: 'teammate-action', name: '白鹭', text: '她把耳朵贴上门。' },
+    { id: 'line', role: 'teammate', name: '白鹭', text: '来看看。' }
+  ]);
+  const spoken = root.querySelector('[data-msg-id="dialogue"]');
+  ok(spoken.children[0].classList.contains('teammate'), '旧记录里的队友代演台词使用队友身份');
+  ok(spoken.children[1].classList.contains('npc'), '真正的 NPC 保留独立身份');
+}
+
 // ---------------------------------------------------------------------------
 console.log('\n== BUG1 纯指令回复不留空气泡 ==');
 // ---------------------------------------------------------------------------

@@ -492,14 +492,10 @@ ok(!/animation:[^;]*infinite/.test(investigatorCss), '调查员主题的装饰�
 
 // 高频出现的队友发言不能用语义绿底：
 // 一局几十条绿块会把视线从 KP 叙述上抢走。
-// 「队友自主行动」是低频事件，保留绿底做区分。
 {
-  const m = stripped.match(/\.msg\.teammate\s+\.bubble\s*\{[^}]*\}/);
-  ok(m !== null, '定义了 .msg.teammate .bubble');
-  ok(m && !m[0].includes('var(--clue-bg)'), '普通队友发言用中性底，不用语义绿底');
-  ok(m && m[0].includes('border-left'), '普通队友发言靠左侧色条区分身份');
-  const ma = stripped.match(/\.msg\.teammate-action\s+\.bubble\s*\{[^}]*\}/);
-  ok(ma && ma[0].includes('var(--clue-bg)'), '队友自主行动保留绿底（低频、需要醒目）');
+  const m = stripped.match(/\.msg:is\(\.teammate, \.teammate-action\)\s+\.bubble\s*\{[^}]*\}/);
+  ok(m?.[0].includes('var(--bg-panel)'), '队友发言与行动共用中性面板底色');
+  ok(m?.[0].includes('border-left'), '队友气泡靠左侧色条区分身份');
 }
 
 // ---------------------------------------------------------------------------

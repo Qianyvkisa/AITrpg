@@ -33,6 +33,11 @@ const inflight = new Map();
  * 用一个独立的集合记录，请求彻底结束（成功返回或不再重试）时清掉。
  */
 const canceled = new Set();
+const GAME_TIMEOUT_MS = { keeper: 50000, teammate: 12000 };
+
+function timedOut() {
+  return { ok: false, timedOut: true, error: '模型响应超时', friendly: '模型响应超时，本轮进度已保留。' };
+}
 
 /**
  * 拉取可用模型列表（GET /models）。
@@ -105,6 +110,10 @@ async function chat(payload, hooks = {}) {
   const stream = payload.stream !== false;
   const requestId = payload.requestId;
   const hasId = requestId !== undefined && requestId !== null;
+  const limit = GAME_TIMEOUT_MS[payload.purpose];
+  const timeout = limit && Number.isFinite(payload.timeoutMs)
+    ? Math.max(1, Math.min(payload.timeoutMs, limit)) : limit;
+  const deadline = timeout ? Date.now() + timeout : 0;
 
   // 清掉可能残留的取消标记（同一个 requestId 理论上不会复用，但别留脏数据）
   if (hasId) canceled.delete(requestId);
@@ -126,14 +135,16 @@ async function chat(payload, hooks = {}) {
       // 否则玩家点了取消还要被这一段退避拖住。
       if (attempt > 0) {
         const wait = backoffDelay(attempt);
+        if (deadline && Date.now() + wait >= deadline) return timedOut();
         hooks.onRetry?.({ attempt, maxRetries, delayMs: wait, error: lastRes?.error });
         const ok = await sleep(wait, isCanceled);
         if (!ok) return { ok: false, canceled: true, error: '请求已取消' };
       }
 
-      lastRes = await attemptOnce(payload, {
-        target, stream, requestId, hooks
-      });
+      if (isCanceled()) return { ok: false, canceled: true, error: '已停止等待' };
+      const remaining = deadline ? deadline - Date.now() : null;
+      if (remaining !== null && remaining <= 0) return timedOut();
+      lastRes = await attemptOnce(payload, { target, stream, requestId, hooks, timeoutMs: remaining });
 
       if (lastRes.ok) {
         // 重试过就记一笔，方便排查「偶尔卡一下」的情况
@@ -142,7 +153,7 @@ async function chat(payload, hooks = {}) {
       }
 
       // 玩家主动取消：立刻返回，绝不重试
-      if (lastRes.canceled) return lastRes;
+      if (lastRes.canceled || lastRes.timedOut) return lastRes;
 
       // 不值得重试的错误（密钥错、模型名错等）立刻返回，别浪费玩家时间。
       // 但同样要附上「人话」说明——401 这类恰恰是最需要告诉玩家去改哪里的。
@@ -199,7 +210,7 @@ function sleep(ms, isCanceled) {
  * 发起一次请求（不含重试）。
  * 抽出来是为了让 chat() 的重试循环干净，也让「流式只能试一次」的约束集中在这里。
  */
-async function attemptOnce(payload, { target, stream, requestId, hooks }) {
+async function attemptOnce(payload, { target, stream, requestId, hooks, timeoutMs }) {
   const headers = { 'Content-Type': 'application/json' };
   if (target.key) headers.Authorization = `Bearer ${target.key}`;
 
@@ -215,6 +226,7 @@ async function attemptOnce(payload, { target, stream, requestId, hooks }) {
   });
 
   const controller = new AbortController();
+  const timer = timeoutMs ? setTimeout(() => controller.abort('timeout'), timeoutMs) : null;
   if (requestId !== undefined && requestId !== null) inflight.set(requestId, controller);
 
   // 是否已经往外推过内容。流式一旦推过 chunk 就不能重试，
@@ -232,6 +244,7 @@ async function attemptOnce(payload, { target, stream, requestId, hooks }) {
     if (!res.ok) {
       let detail = '';
       try { detail = (await res.text()).slice(0, 800); } catch (_) { /* ignore */ }
+      controller.signal.throwIfAborted();
       return {
         ok: false,
         status: res.status,
@@ -241,9 +254,12 @@ async function attemptOnce(payload, { target, stream, requestId, hooks }) {
 
     if (!stream) {
       const data = await res.json();
+      const choice = data?.choices?.[0];
+      const error = GAME_TIMEOUT_MS[payload.purpose] && responseError(choice?.finish_reason, choice?.message?.content);
+      if (error) return { ok: false, error };
       return {
         ok: true,
-        text: data?.choices?.[0]?.message?.content ?? '',
+        text: choice?.message?.content ?? '',
         usage: data?.usage ?? null
       };
     }
@@ -253,17 +269,28 @@ async function attemptOnce(payload, { target, stream, requestId, hooks }) {
       hooks.onChunk?.(data);
     };
 
-    const { text, usage } = await readStream(res, requestId, wrapped);
+    const { text, usage, finish } = await readStream(res, requestId, wrapped);
+    const error = GAME_TIMEOUT_MS[payload.purpose] && responseError(finish, text);
+    if (error) return { ok: false, error };
     return { ok: true, text, usage };
   } catch (e) {
-    if (e && e.name === 'AbortError') return { ok: false, canceled: true, error: '请求已取消' };
+    if (controller.signal.reason === 'timeout') return timedOut();
+    if (controller.signal.aborted || e?.name === 'AbortError') return { ok: false, canceled: true, error: '已停止等待' };
     // 已经推过内容的中断不能重试（会把界面上那半截重复写一遍），
     // 标记成 canceled 让上层当作「已取消」处理，不再重试。
-    if (pushed) return { ok: false, canceled: true, error: '流式输出中断' };
+    if (pushed) return { ok: false, error: '模型回复中断，请继续叙事。' };
     return { ok: false, error: e?.message || String(e) };
   } finally {
+    clearTimeout(timer);
     if (requestId !== undefined && requestId !== null) inflight.delete(requestId);
   }
+}
+
+function responseError(finish, text) {
+  if (finish === 'length') return '模型回复达到输出上限，草稿未结算。';
+  if (finish === 'content_filter') return '模型未能完成回复，请继续叙事。';
+  if (typeof text !== 'string' || !text.trim()) return '模型返回了空回复，请继续叙事。';
+  return '';
 }
 
 /** 逐块读取 SSE 流，边解析边通过 onChunk 推送增量 */
@@ -277,29 +304,49 @@ async function readStream(res, requestId, onChunk) {
   // 只能靠每次响应自报。原来这里只取 delta.content，把 usage 整个丢了，
   // 于是界面无从显示用量。
   let usage = null;
+  let finish;
+  let receivedDone = false;
+  let finishTimer;
+  const closeReader = () => { void reader.cancel?.().catch(() => {}); };
 
   const handle = (payloads) => {
     for (const data of payloads) {
-      if (data === '[DONE]') continue;
+      if (data === '[DONE]') {
+        receivedDone = true;
+        break;
+      }
       let obj;
       try { obj = JSON.parse(data); } catch (_) { continue; }  // 不完整分片，忽略
       // usage 可能挂在任意一条上（多数实现在最后一条），有就记下来
       if (obj?.usage && typeof obj.usage === 'object') usage = obj.usage;
-      const delta = obj?.choices?.[0]?.delta?.content;
-      if (!delta) continue;
+      const choice = obj?.choices?.[0];
+      if (choice?.finish_reason && !finish) {
+        finish = choice.finish_reason;
+        // 已结束的回复只留一点时间接收 usage，兼容不主动关闭流的网关。
+        finishTimer = setTimeout(closeReader, 450);
+      }
+      const delta = choice?.delta?.content;
+      if (typeof delta !== 'string' || !delta) continue;
       full += delta;
       onChunk?.({ requestId, delta });
     }
   };
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    handle(sse.push(decoder.decode(value, { stream: true })));
+  try {
+    while (!receivedDone) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      handle(sse.push(decoder.decode(value, { stream: true })));
+    }
+    if (receivedDone) closeReader();
+    else {
+      handle(sse.push(decoder.decode()));
+      handle(sse.flush());
+    }
+    return { text: full, usage, finish };
+  } finally {
+    clearTimeout(finishTimer);
   }
-  handle(sse.flush());
-
-  return { text: full, usage };
 }
 
 function cancel(requestId) {

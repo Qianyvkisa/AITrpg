@@ -113,7 +113,7 @@ export async function generateTeammateAction(state, api, char, opts = {}) {
     ]
   });
 
-  if (!res.ok) return { ok: false, error: res.error };
+  if (!res.ok) return { ok: false, error: res.friendly || res.error, canceled: res.canceled, timedOut: res.timedOut };
 
   const raw = (res.text || '').trim();
   if (!raw) return { ok: false, error: '队友没有给出行动' };

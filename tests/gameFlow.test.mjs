@@ -32,6 +32,34 @@ function createEngine(state, respond) {
 
 const storedSnapshot = (state) => JSON.parse(JSON.stringify(buildSnapshot(state)));
 
+test('停止等待后拒绝迟到的守密人回复，继续使用原行动', async () => {
+  const state = createInitialState();
+  state.module = { raw: '场景流程：书房 → 门厅' };
+  state.scenario.scene = '书房';
+  let finish;
+  let canceled;
+  const engine = new GameEngine(state, {
+    onChunk: () => () => {},
+    chat: () => new Promise(resolve => { finish = resolve; }),
+    cancel: id => { canceled = id; }
+  });
+  const phases = [];
+  engine.on(event => { if (event.type === 'narration-status') phases.push(event.label); });
+  const pending = engine.takeTurn('推开门');
+  await engine.cancelNarration();
+  finish({ ok: true, text: '迟到的回复。[[SCENE:门厅]]' });
+  assert.equal((await pending).ok, false);
+  assert.equal(canceled, 1);
+  assert.equal(state.turns, 0);
+  assert.equal(state.scenario.scene, '书房');
+  assert.ok(state.keeperContinuation.retryAction);
+  assert.deepEqual(phases, ['等待守密人响应', '正在停止', '']);
+  engine.api.chat = async () => ({ ok: true, text: '你来到门厅。[[SCENE:门厅]]' });
+  assert.equal((await engine.takeTurn('')).ok, true);
+  assert.equal(state.messages.filter(m => m.role === 'user').length, 1);
+  assert.equal(state.scenario.scene, '门厅');
+});
+
 test('奇数最大 HP 的重伤门槛、累计小伤昏迷、濒死和即死分别结算', () => {
   const ch = createCharacter({ name: '林默' });
   ch.hp = { max: 11, current: 11 };

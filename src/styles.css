@@ -648,7 +648,7 @@ body::before {
    整块绿色底会把视线从 KP 叙述上抢走，而且多套主题的 --clue-bg
    饱和度都不低（pixel #101a10、vhs #1a1408），叠在深底上像贴了色块。
    身份区分交给左侧 2px 色条 + 名字颜色：足够辨认，又不打断阅读节奏。 */
-.msg.teammate .bubble {
+.msg:is(.teammate, .teammate-action) .bubble {
   background: var(--bg-panel);
   border-left: 2px solid var(--clue-accent);
   padding: 8px 14px;
@@ -657,22 +657,7 @@ body::before {
   font-size: 13.5px;
   max-width: 82%;
 }
-.msg.teammate .msg-role { color: var(--clue); }
-
-/* 队友自主行动：队友 AI 自己决定做的事，比「队友插话」更醒目一点，
-   玩家要能一眼看出这一步是队友自己走的，不是 KP 代演。
-   这一档保留语义绿底：它是低频事件（一局几条），值得占视觉重量；
-   高频的普通发言用中性底，两者靠「有没有绿底」区分得很清楚。 */
-.msg.teammate-action .bubble {
-  background: var(--clue-bg);
-  border-left: 3px solid var(--clue-accent);
-  padding: 8px 14px;
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  color: var(--clue-ink);
-  font-size: 13.5px;
-  max-width: 82%;
-}
-.msg.teammate-action .msg-role { color: var(--ok-ink); font-weight: 600; }
+.msg:is(.teammate, .teammate-action) .msg-role { color: var(--clue); }
 
 /* NPC 台词：KP 扮演的酒保、警长、老教授等 */
 .msg.npc .bubble {
@@ -786,6 +771,14 @@ body::before {
   flex-wrap: wrap;
   row-gap: 6px;
 }
+
+.narration-status {
+  align-self: center;
+  margin-inline-end: auto;
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+.composer-actions:has(.narration-status:not([hidden])) .composer-hint { display: none; }
 
 /* 自动推进「开启中」：用强调色描边 + 呼吸感，让玩家一眼看出它正在自己跑，
    免得以为卡住了、或者忘了它开着而奇怪「怎么一直自己在动」。 */

@@ -33,6 +33,9 @@ export class GameEngine {
     this.api = api;       // window.api
     this.listeners = new Set();
     this.requestId = 0;
+    this.activeNarration = null;
+    this.narrationCanceled = false;
+    this.narrationTimedOut = false;
     // 上一次 KP 请求失败时主进程给出的「人话」说明（如「模型服务暂时不可用」），
     // 供界面层拿来提示玩家，而不是甩一段 HTTP 原文。
     this.lastError = '';
@@ -217,29 +220,39 @@ export class GameEngine {
     return this.runKeeper();
   }
 
-  async requestKeeper(messages, onChunk) {
-    const rid = ++this.requestId;
+  async requestNarration(payload, label, onChunk) {
+    const request = { id: ++this.requestId, canceled: false };
+    this.activeNarration = request;
+    this.emit({ type: 'narration-status', label });
     let draft = '';
-    const off = this.api.onChunk(({ requestId, delta }) => {
-      if (requestId !== rid) return;
+    const off = onChunk && this.api.onChunk(({ requestId, delta }) => {
+      if (requestId !== request.id || request.canceled) return;
+      if (!draft) this.emit({ type: 'narration-status', label: '守密人正在生成正文' });
       draft += delta;
       onChunk(draft);
     });
     try {
-      const res = await this.api.chat({
-        ...this.state.apiConfig,
-        stream: true,
-        messages,
-        purpose: 'keeper',
-        requestId: rid
-      });
-      if (res.ok) this.recordUsage(res.usage);
+      const res = await this.api.chat({ ...payload, requestId: request.id });
+      if (request.canceled) return { ok: false, canceled: true, error: '已停止等待' };
+      if (res.timedOut) this.narrationTimedOut = true;
+      if (res.ok && payload.purpose === 'keeper') this.recordUsage(res.usage);
       return { ...res, text: res.text || draft };
     } catch (e) {
+      if (request.canceled) return { ok: false, canceled: true, error: '已停止等待' };
       return { ok: false, error: e?.message || String(e) };
     } finally {
-      off();
+      if (off) off();
+      this.activeNarration = null;
+      this.emit({ type: 'narration-status', label: '' });
     }
+  }
+
+  async cancelNarration() {
+    const request = this.activeNarration;
+    if (!request || request.canceled) return;
+    request.canceled = this.narrationCanceled = true;
+    this.emit({ type: 'narration-status', label: '正在停止', stopping: true });
+    await this.api.cancel?.(request.id);
   }
 
   async runKeeper() {
@@ -252,9 +265,14 @@ export class GameEngine {
     let res;
     let parsed;
     let correction = '';
+    const deadline = Date.now() + 50000;
     // 模组草稿验证通过前只显示等待状态。失败只重写一次，避免消耗失控。
     for (let attempt = 0; attempt < (guide ? 2 : 1); attempt++) {
-      res = await this.requestKeeper(this.buildKeeperMessages(guide, correction), draft => {
+      const messages = this.buildKeeperMessages(guide, correction);
+      res = await this.requestNarration({
+        ...s.apiConfig, stream: true, messages, purpose: 'keeper',
+        timeoutMs: Math.max(1, deadline - Date.now())
+      }, attempt ? '守密人正在按模组重写' : '等待守密人响应', draft => {
         if (!live) return;
         live.text = draft;
         this.emit({ type: 'stream-chunk', messageId: live.id });
@@ -275,7 +293,7 @@ export class GameEngine {
       // 优先用主进程给出的「人话」说明（friendly），它会把 HTTP 502 这类
       // 网关故障翻译成玩家看得懂的话；没有就退回原始错误。
       const text = res.canceled
-        ? '【已取消】'
+        ? '【已停止等待】本轮进度已保留，可以继续叙事。'
         : `【KP 连接失败】${res.friendly || res.error}`;
       // 记在实例上，让 takeTurn 能把「人话」一路带到界面层。
       // 用字段而不是改返回值，是为了不破坏 playerAction 返回 boolean 的既有契约。
@@ -505,6 +523,8 @@ export class GameEngine {
    * 就叙述一个虚构的结果。玩家掷完骰后由 rollAndResume 接着跑。
    */
   async takeTurn(text, opts = {}) {
+    this.narrationCanceled = false;
+    this.narrationTimedOut = false;
     this.reconcileParty();
     const s = this.state;
     if (s.scenario.ended) return { chain: 0, ok: false, error: '本次调查已结束。' };
@@ -523,11 +543,14 @@ export class GameEngine {
     if (s.scenario.ended) return { chain: 0, ok: true, error: '' };
     const result = await this.resumeKeeper();
     if (!result.ok || this.pendingRolls().length || this.state.scenario.ended) return result;
-    await this.runTeammateActions();
+    const acted = await this.runTeammateActions();
     if (s.keeperContinuation && !s.awaitingRoll) {
       return { chain: result.chain, ok: false, error: this.lastError || '队友行动尚未完成续写。' };
     }
-    if (!this.pendingRolls().length && !this.state.keeperContinuation) await this.autoTeammateChatter();
+    if (!acted && !this.narrationCanceled && !this.narrationTimedOut &&
+        !this.pendingRolls().length && !this.state.keeperContinuation) {
+      await this.autoTeammateChatter();
+    }
     return result;
   }
 

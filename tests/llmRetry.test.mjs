@@ -97,6 +97,39 @@ const msgs = [{ role: 'user', content: 'hi' }];
 const basePayload = { messages: msgs, stream: false, requestId: 1 };
 
 // ---------------------------------------------------------------------------
+console.log('\n== 跑团流式请求完成、超时和截断 ==');
+{
+  const enc = new TextEncoder();
+  let closed = false;
+  const sse = new ReadableStream({
+    start(controller) {
+      controller.enqueue(enc.encode('data: {"choices":[{"delta":{"content":"尘埃落定。"},"finish_reason":"stop"}]}\n\ndata: {"usage":{"total_tokens":42}}\n\ndata: [DONE]\n\n'));
+    },
+    cancel() { closed = true; }
+  });
+  globalThis.fetch = async () => new Response(sse);
+  const res = await chat({ ...basePayload, purpose: 'keeper', stream: true, timeoutMs: 100 });
+  eq(res.text, '尘埃落定。', '收到结束标记就返回，不等网关关闭连接');
+  eq(res.usage?.total_tokens, 42, '保留结束标记之前的用量');
+  eq(closed, true, '释放结束后的读取连接');
+
+  let attempts = 0;
+  globalThis.fetch = async (_url, { signal }) => {
+    attempts++;
+    return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  };
+  const timeout = await chat({ ...basePayload, purpose: 'keeper', timeoutMs: 15 });
+  eq(timeout.timedOut, true, '迟迟没有首包时退出等待');
+  eq(attempts, 1, '总时限到了不重开请求');
+
+  for (const data of ['[DONE]', '{"choices":[{"delta":{"content":"[[HP:-1]]"},"finish_reason":"length"}]}']) {
+    globalThis.fetch = async () => new Response('data: ' + data + '\n\n');
+    const partial = await chat({ ...basePayload, purpose: 'keeper', stream: true });
+    eq(partial.ok, false, '空回复或明确截断不能进入结算');
+  }
+}
+
+// ---------------------------------------------------------------------------
 console.log('\n== 502 一次后成功：自动重试并返回内容 ==');
 
 {

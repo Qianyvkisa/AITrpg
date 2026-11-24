@@ -25,6 +25,22 @@ const ROLE_LABELS = {
   npc: 'NPC'
 };
 
+let currentTeammates = () => [];
+const pastTeammates = new Set();
+
+function speechRole(name) {
+  const speaker = String(name || '').trim();
+  return speaker && (pastTeammates.has(speaker) || currentTeammates().includes(speaker))
+    ? 'teammate'
+    : 'npc';
+}
+
+function rememberTeammate(message) {
+  if ((message.role === 'teammate' || message.role === 'teammate-action') && message.name) {
+    pastTeammates.add(String(message.name).trim());
+  }
+}
+
 /** 距底部多少像素内算「贴着底部」，超过就算用户在翻历史 */
 const STICK_THRESHOLD = 48;
 
@@ -108,7 +124,8 @@ export function scrollToBottom({ force = false } = {}) {
  * 按钮本身是提示 + 一键回底，不影响自动跟随（跟随逻辑靠 stick 判定，
  * 玩家在底部时新内容照常自动下滑）。
  */
-export function initMessageScroll() {
+export function initMessageScroll(readTeammates = () => []) {
+  currentTeammates = readTeammates;
   const m = box();
   if (!m) return;
 
@@ -147,6 +164,7 @@ export function initMessageScroll() {
  */
 export function renderMessage(msg, opts = {}) {
   if (msg.hidden) return null;
+  rememberTeammate(msg);
 
   const parent = opts.parent || null;
 
@@ -164,7 +182,7 @@ export function renderMessage(msg, opts = {}) {
   }
 
   const wrap = document.createElement('div');
-  wrap.className = `msg ${msg.role}`;
+  wrap.className = `msg ${msg.role === 'npc' ? speechRole(msg.name) : msg.role}`;
   // 流式消息不加入场动画：它的内容每帧都在变，动画会反复重放
   // suppressEnterAnim 期间（批量重建）也不加：上千条同时动画会卡死
   if (!msg.streaming && !suppressEnterAnim) wrap.classList.add('enter');
@@ -302,15 +320,15 @@ function renderKeeperWithSays(msg, segs, parent = null) {
 
   list.forEach((seg, i) => {
     const wrap = document.createElement('div');
-    const isNpc = seg.kind === 'say';
-    wrap.className = `msg ${isNpc ? 'npc' : 'keeper'}`;
+    const spoken = seg.kind === 'say';
+    wrap.className = `msg ${spoken ? speechRole(seg.name) : 'keeper'}`;
     if (!msg.streaming && !suppressEnterAnim) wrap.classList.add('enter');
     wrap.dataset.msgId = msg.id;
     if (i > 0) wrap.dataset.sub = String(i);
 
     const roleEl = document.createElement('div');
     roleEl.className = 'msg-role';
-    roleEl.textContent = isNpc ? seg.name || 'NPC' : ROLE_LABELS.keeper;
+    roleEl.textContent = spoken ? seg.name || 'NPC' : ROLE_LABELS.keeper;
     wrap.appendChild(roleEl);
 
     const bubble = document.createElement('div');
@@ -339,6 +357,8 @@ export function renderAllMessages(messages) {
   if (!m) return;
 
   const list = Array.isArray(messages) ? messages : [];
+  pastTeammates.clear();
+  list.forEach(rememberTeammate);
   windowSource = list;
   windowStart = computeWindowStart(list, list.length);
 
@@ -548,15 +568,15 @@ function rebuildGroup(group, segs, msg) {
   group.hidden = false;
 
   list.forEach((seg, i) => {
-    const isNpc = seg.kind === 'say';
+    const spoken = seg.kind === 'say';
     const wrap = document.createElement('div');
-    wrap.className = `msg ${isNpc ? 'npc' : 'keeper'}`;
+    wrap.className = `msg ${spoken ? speechRole(seg.name) : 'keeper'}`;
     wrap.dataset.msgId = msg.id;
     if (i > 0) wrap.dataset.sub = String(i);
 
     const roleEl = document.createElement('div');
     roleEl.className = 'msg-role';
-    roleEl.textContent = isNpc ? seg.name || 'NPC' : ROLE_LABELS.keeper;
+    roleEl.textContent = spoken ? seg.name || 'NPC' : ROLE_LABELS.keeper;
     wrap.appendChild(roleEl);
 
     const bubble = document.createElement('div');
