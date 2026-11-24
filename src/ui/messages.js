@@ -9,7 +9,7 @@
 //   3) 用户主动往上翻看历史时不要强行把他拽回底部（stick 判定）。
 // ---------------------------------------------------------------------------
 import { stripDirectivesForDisplay } from '../shared/text.js';
-import { splitNarration } from '../core/protocol.js';
+import { cleanNarrationProse, splitNarration } from '../core/protocol.js';
 
 const ROLE_LABELS = {
   user: '你',
@@ -205,7 +205,7 @@ export function renderMessage(msg, opts = {}) {
   bubble.className = 'bubble';
 
   if (msg.role === 'keeper') {
-    const body = msg.clean ?? stripDirectivesForDisplay(msg.text || '');
+    const body = cleanNarrationProse(msg.clean ?? stripDirectivesForDisplay(msg.text));
     if (!String(body).trim()) {
       // 没有可见文字：流式期间给个占位让光标有处可闪，
       // 定稿后（纯指令回复）整条隐藏，不留「守密人」下面空空如也
@@ -305,7 +305,10 @@ function renderKeeperWithSays(msg, segs, parent = null) {
   anchor.className = 'msg-group';
   anchor.dataset.msgId = msg.id;
 
-  const list = (segs || []).filter((s) => String(s.text || '').trim());
+  // 旧存档可能已保存分段。只清理旁白，保留 NPC 台词里的停顿。
+  const list = segs
+    .map((seg) => seg.kind === 'prose' ? { ...seg, text: cleanNarrationProse(seg.text) } : seg)
+    .filter((seg) => seg.text?.trim());
 
   // 定稿且没有任何可见文字（例如整条回复只有 [[CHECK]] 指令）：
   // 不渲染任何气泡，避免出现「守密人」下面空空如也
@@ -642,6 +645,7 @@ export function endStreamingBubble(msgId) {
       if (bubble) {
         bubble.classList.remove('cursor-blink');
         bubble.textContent = splitNarration(settled.text || '').map((s) => s.text).join('\n');
+        el.hidden = !bubble.textContent;
       }
     }
   }
@@ -663,7 +667,8 @@ export function applyCleanText(message) {
   const settled = { ...message, streaming: false };
   const segs = splitNarration(message.text || '');
 
-  if (el.classList.contains('msg-group')) {
+  if (el.classList.contains('msg-group') || segs.some((seg) => seg.kind === 'say')) {
+    el.className = 'msg-group';
     rebuildGroup(el, segs, settled);
     el.querySelectorAll('.bubble').forEach((b) => b.classList.remove('cursor-blink'));
     return;
@@ -673,7 +678,7 @@ export function applyCleanText(message) {
   if (!bubble) return;
 
   // 定稿后没有可见文字（纯指令回复）：整条隐藏，不留空气泡
-  const body = message.clean ?? stripDirectivesForDisplay(message.text || '');
+  const body = cleanNarrationProse(message.clean ?? stripDirectivesForDisplay(message.text));
   bubble.classList.remove('cursor-blink');
   bubble.textContent = body;
   el.hidden = !String(body).trim();

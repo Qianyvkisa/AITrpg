@@ -62,6 +62,7 @@ export function keeperSystemPrompt({ module, moduleReference, moduleProgress, mo
 - 角色名就是 NPC 的名字或称呼（酒保、警长、老教授、柜台后的女人）
 - 一次回复里可以让 1~2 个 NPC 说话，不要所有 NPC 都抢着说
 - 台词要短，一两句，像真人说话，不要写成书面语
+- 台词的句号、问号等标点写在 ]] 之前；指令结束后不要补标点
 - 旁白和 SAY 指令可以交替出现，系统会按顺序拆成不同的气泡
 - 用 SAY 的好处：玩家看到的是「酒保：这么晚还来……」这样的对话，而不是你一个人在叙述
 

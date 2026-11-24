@@ -17,6 +17,8 @@
 //   也才能在界面文案变化时保持导出稳定。
 // ---------------------------------------------------------------------------
 
+import { cleanNarrationProse } from './protocol.js';
+
 /** 每行的时间戳格式：HH:MM */
 function hhmm(ts) {
   if (!Number.isFinite(ts)) return '';
@@ -71,7 +73,8 @@ function describeRoll(m) {
 function linesOfMessage(m) {
   const t = hhmm(m.ts);
   const time = t ? `[${t}] ` : '';
-  const text = String(m.clean ?? m.text ?? '').trim();
+  const raw = m.clean ?? m.text;
+  const text = m.role === 'keeper' ? cleanNarrationProse(raw) : String(raw ?? '').trim();
 
   switch (m.role) {
     case 'user':

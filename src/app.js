@@ -627,9 +627,6 @@ function updateRollGate() {
       : observe ? `你的调查员处于${disabledCharacter}状态，可推进同伴的行动。`
       : state.mode === 'spectator' ? '输入剧情指示，或留空直接推进…' : '描述你的行动…');
   }
-  const chatter = $('#btnAuto');
-  if (chatter) chatter.disabled = client || ended || busy || pending || !!retry ||
-    !state.teammates.some((character) => !incapacity(character) && !rollOwner(state, character));
   if (ended && state.autoAdvance) stopAutoAdvance(null);
   const queue = pending ? engine.pendingRolls() : [];
   const pendingRolls = new Map(queue.map((roll) => [roll.id, roll]));
@@ -686,7 +683,7 @@ async function init() {
   engine.rollOwner = (character) => rollOwner(state, character);
   engine.on(handleEngineEvent);
   // 引擎每轮结束后会让队友自发接话，具体怎么调 LLM 由这里提供
-  engine.setTeammateSpeaker(() => teammateSpeak({ fromEngine: true }));
+  engine.setTeammateSpeaker(teammateSpeak);
   // 队友自主行动：引擎决定「什么时候编排」，这里提供「谁要行动、行动内容」
   engine.setTeammateActor(() => planTeammateActions());
 
@@ -1067,7 +1064,6 @@ function bindUI() {
     }
   });
 
-  $('#btnAuto').onclick = teammateSpeak;
 
   $('#btnNewChar').onclick = () => {
     // 旁观模式下新增玩家角色会与「没有玩家」的前提冲突
@@ -1330,38 +1326,19 @@ async function planTeammateActions() {
 }
 
 /** 队友 AI 主动插话 */
-async function teammateSpeak(opts = {}) {
+async function teammateSpeak() {
   if (state.scenario.ended || state.net.role === 'client' || state.keeperContinuation ||
-      hasPendingRoll() || (busy && !opts.fromEngine)) return;
+      hasPendingRoll()) return;
 
   const teammates = state.teammates.filter((character) => !rollOwner(state, character) && !incapacity(character));
   if (!teammates.length) return;
-  if (!opts.fromEngine) {
-    busy = true;
-    updateRollGate();
-    publishRoomState();
-  }
-
-  try {
-    const api = { chat: payload => engine.requestNarration({
-      ...payload, maxRetries: 0
-    }, '等待队友插话') };
-    const res = await generateTeammateLine({ ...state, teammates }, api);
-    if (res.canceled) return;
-    if (!res.ok) throw new Error(res.error);
-    engine.pushMessage({ role: 'teammate', name: res.name, text: res.text });
-    scrollToBottom();
-    await autoSave();
-  } catch (error) {
-    if (opts.fromEngine) throw error;
-    engine.pushMessage({ role: 'system', text: `【队友 AI 失败】${error.message}` });
-  } finally {
-    if (!opts.fromEngine) {
-      busy = false;
-      updateRollGate();
-      publishRoomState();
-    }
-  }
+  const api = { chat: payload => engine.requestNarration({
+    ...payload, maxRetries: 0
+  }, '等待队友回应') };
+  const res = await generateTeammateLine({ ...state, teammates }, api);
+  if (res.canceled) return;
+  if (!res.ok) throw new Error(res.error);
+  engine.pushMessage({ role: 'teammate', name: res.name, text: res.text });
 }
 
 // ---------------------------------------------------------------------------

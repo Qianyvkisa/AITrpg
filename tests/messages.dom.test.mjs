@@ -98,7 +98,7 @@ globalThis.document = {
 globalThis.requestAnimationFrame = (fn) => { fn(); return 1; };
 globalThis.cancelAnimationFrame = () => {};
 
-const { renderMessage, applyCleanText, endStreamingBubble, renderAllMessages } =
+const { renderMessage, applyCleanText, endStreamingBubble, renderAllMessages, scheduleStreamUpdate } =
   await import('../src/ui/messages.js');
 
 let passed = 0;
@@ -199,6 +199,33 @@ renderAllMessages([
 ok(blinking().length === 0, '读档重绘后没有光标');
 ok(emptyVisibleBubbles().length === 0, '读档重绘后没有空气泡');
 ok(visibleBubbles().length === 2, '两条有内容的消息可见');
+
+reset();
+const whisper = '她的声音压得很低，快到几乎是气声。';
+const artifact = '.\n\n' + whisper;
+const live = { id: 'stray', role: 'keeper', streaming: true, text: '.' };
+const liveBubble = renderMessage(live);
+ok(visibleBubbles().every((bubble) => bubble.textContent !== '.'), '流式开始时隐藏孤立句点');
+live.text = artifact;
+scheduleStreamUpdate(live);
+ok(liveBubble.querySelector('.bubble')?.textContent === whisper, '流式旁白不会显示孤立句点或开头空行');
+endStreamingBubble(live.id);
+applyCleanText({ ...live, text: '[[SAY: 管家 | 别出声。]]' + artifact, clean: artifact, streaming: false });
+ok(visibleBubbles().map((bubble) => bubble.textContent).join('|') === '别出声。|' + whisper,
+  '定稿在同一帧补齐台词时仍按顺序显示台词和旁白');
+
+reset();
+renderAllMessages([
+  { id: 'legacy', role: 'keeper', text: artifact, clean: artifact },
+  { id: 'legacy-segments', role: 'keeper', segments: [
+    { kind: 'prose', text: '。' },
+    { kind: 'say', name: '管家', text: '……' },
+    { kind: 'prose', text: artifact }
+  ] },
+  { id: 'user-period', role: 'user', text: '.' }
+]);
+ok(visibleBubbles().map((bubble) => bubble.textContent).join('|') === [whisper, '……', whisper, '.'].join('|'),
+  '读旧档时清理旁白，保留 NPC 的停顿和玩家原文');
 
 // ---------------------------------------------------------------------------
 console.log('\n== 队友自主行动的气泡 ==');

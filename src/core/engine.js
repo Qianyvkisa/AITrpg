@@ -6,7 +6,7 @@
 //   - 具体指令如何结算，交给 directives.js 的处理器
 //   - 骰点随机性只在 dice.js 里发生
 // ---------------------------------------------------------------------------
-import { parseDirectives, splitNarration } from './protocol.js';
+import { cleanNarrationProse, parseDirectives, splitNarration } from './protocol.js';
 import { keeperSystemPrompt } from './prompts.js';
 import { characterToPrompt } from './character.js';
 import { cancelPendingRoll, getHandler, pendingCharacter, rollBlocker, rollPending, summarizeResults, waitsForWoundCheck } from './directives.js';
@@ -152,15 +152,13 @@ export class GameEngine {
       .slice(-HISTORY_LIMIT);
 
     for (const m of recent) {
-      // 历史 KP 消息用 clean 版本（去掉指令），否则 AI 会以为指令还没结算
-      const keeperText = m.clean ?? m.text ?? '';
-
       // _src 指回原始消息：压缩模块要按角色做摘要（检定要知道是谁掷的什么），
       // 只靠 OpenAI 格式的 role/content 分不清「队友行动」和「玩家输入」。
       // 这个字段不会被发给上游（发之前会剥掉，见 compactHistory 的调用处）。
       if (m.role === 'user') {
         if (m.text) messages.push({ role: 'user', content: m.text, _src: m });
       } else if (m.role === 'keeper') {
+        const keeperText = cleanNarrationProse(m.clean ?? m.text);
         if (keeperText) messages.push({ role: 'assistant', content: keeperText, _src: m });  // 跳过空占位
       } else if (m.role === 'system-result') {
         if (m.text) messages.push({ role: 'user', content: `[系统] ${m.text}`, _src: m });

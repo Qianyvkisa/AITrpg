@@ -280,21 +280,16 @@
 [data-theme="ritual"] #btnAutoAdvance.on { animation: none; border-color: var(--clue-accent); color: var(--clue); }
 
 [data-theme="ritual"] .modal-backdrop { background: rgba(var(--bg-deep-rgb), .87); }
-[data-theme="ritual"] .modal { position: relative; border-color: var(--border-strong); backdrop-filter: none; }
-[data-theme="ritual"] .modal::before {
-  content: '';
-  position: absolute;
-  z-index: 1;
-  inset: 0;
-  pointer-events: none;
-  border: 22px solid transparent;
-  border-image: url('assets/ritual/frame.webp') 54 66 / 22px / 1px stretch;
-  opacity: .86;
+[data-theme="ritual"] .modal {
+  border-width: 16px;
+  border-color: var(--border-strong);
+  border-image: url('assets/ritual/frame.webp') 54 66 / 1 stretch;
+  background-clip: padding-box;
+  backdrop-filter: none;
   image-rendering: pixelated;
 }
-[data-theme="ritual"] :is(.modal-head, .modal-body, .modal-foot, .st-tabs) { padding-inline: 25px; }
+[data-theme="ritual"] :is(.modal-head, .modal-body, .modal-foot, .st-tabs, .ce-tabs) { padding-inline: 12px; }
 [data-theme="ritual"] .modal-body { scrollbar-gutter: stable; }
-[data-theme="ritual"] .modal-foot { padding-bottom: 17px; }
 [data-swatch-for="ritual"] { background: #1b150e url('assets/ritual/emblem.webp') center / auto 94% no-repeat; image-rendering: pixelated; }
 [data-swatch-for="ritual"]::before, [data-swatch-for="ritual"]::after { display: none; }
 

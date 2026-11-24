@@ -32,6 +32,15 @@ const DIRECTIVE_RE = /\[\[(CHECK|SAN|DAMAGE|HP|MP|ITEM|FLAG|SCENE|END|NPC|TIME|C
  */
 const SAY_RE = /\[\[SAY:([^\]]*)\]\]/g;
 
+/** 清理单独成行的残留句点，保留正文标点、停顿和正常分段。 */
+export function cleanNarrationProse(text) {
+  return String(text ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/^[^\S\n]*[.。．·][^\S\n]*(?:\n|$)/gm, '')
+    .replace(/\n(?:[^\S\n]*\n){2,}/g, '\n\n')
+    .trim();
+}
+
 /** 解析一条 SAY 指令的正文，返回 { name, text } 或 null */
 function parseSayBody(body) {
   const raw = String(body || '').trim();
@@ -92,8 +101,7 @@ export function parseDirectives(text) {
     clean = clean.replace(full, '');
   }
 
-  clean = clean.replace(/\n{3,}/g, '\n\n').trim();
-  return { directives, clean, says };
+  return { directives, clean: cleanNarrationProse(clean), says };
 }
 
 /** 难度 → 技能值调整 */
@@ -189,7 +197,7 @@ export function splitNarration(text) {
   return out
     .map((seg) =>
       seg.kind === 'prose'
-        ? { ...seg, text: stripPartialDirective(seg.text).replace(/\n{3,}/g, '\n\n').trim() }
+        ? { ...seg, text: cleanNarrationProse(stripPartialDirective(seg.text)) }
         : seg
     )
     .filter((seg) => seg.text);

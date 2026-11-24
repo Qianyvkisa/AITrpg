@@ -351,25 +351,16 @@
   background: rgba(var(--bg-deep-rgb), .88);
 }
 [data-theme="tentacle"] .modal {
-  position: relative;
+  border-width: 14px;
   border-color: var(--border-strong);
+  border-image: url('assets/tentacle/frame.webp') 60 76 / 1 stretch;
   background: var(--bg-panel);
+  background-clip: padding-box;
   backdrop-filter: none;
-}
-[data-theme="tentacle"] .modal::before {
-  content: '';
-  position: absolute;
-  z-index: 1;
-  inset: 0;
-  pointer-events: none;
-  border: 26px solid transparent;
-  border-image: url('assets/tentacle/frame.webp') 60 76 / 18px / 1px stretch;
-  opacity: .67;
   image-rendering: pixelated;
 }
-[data-theme="tentacle"] :is(.modal-head, .modal-body, .modal-foot, .st-tabs) { padding-inline: 24px; }
+[data-theme="tentacle"] :is(.modal-head, .modal-body, .modal-foot, .st-tabs, .ce-tabs) { padding-inline: 12px; }
 [data-theme="tentacle"] .modal-body { scrollbar-gutter: stable; }
-[data-theme="tentacle"] .modal-foot { padding-bottom: 17px; }
 [data-swatch-for="tentacle"] {
   background: #211626 url('assets/tentacle/emblem.webp') center / auto 94% no-repeat;
   image-rendering: pixelated;

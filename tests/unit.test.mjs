@@ -1342,6 +1342,15 @@ group('splitNarration 按顺序切分旁白与台词', () => {
   eq(splitNarration(t).length, 2, '第一次切分');
   eq(splitNarration(t).length, 2, '第二次切分一致');
   eq(splitNarration(t)[1].text, '雨停了。', '内容稳定');
+
+  const stray = '[[SAY: 管家 | 别出声。]]。\r\n \r\n她的声音压得很低，快到几乎是气声。';
+  eq(parseDirectives(stray).clean, '她的声音压得很低，快到几乎是气声。', '定稿去掉指令后孤立的句点');
+  const afterSay = splitNarration(stray);
+  eq(afterSay[0].text, '别出声。', '台词内部的句号保留');
+  eq(afterSay[1].text, '她的声音压得很低，快到几乎是气声。', '拆分后的旁白没有孤立的标点');
+  eq(splitNarration('[[CHECK: 聆听]]\n.\n').length, 0, '只有指令和孤立句点时不产生旁白');
+  eq(splitNarration('她止住了话。\n.\n\n……\n\n她继续说。')[0].text,
+    '她止住了话。\n\n……\n\n她继续说。', '保留正文句号、段落和独立省略号');
 });
 
 // ---------------------------------------------------------------------------

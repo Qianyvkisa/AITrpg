@@ -906,6 +906,12 @@ body::before {
 .modal.wide { width: min(760px, 94vw); }
 .modal.narrow { width: min(440px, 92vw); }
 
+.modal > :is(.modal-head, .modal-foot, .st-tabs, .ce-tabs) {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+.modal :is(.modal-body, .setup-grid, .setup-col) { scroll-padding-block: 6px; }
+
 /* ===========================================================================
    设置面板：tab 与外观选择
    ===========================================================================
@@ -1099,6 +1105,7 @@ body::before {
 
 .modal-head {
   display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
   padding: 14px 18px;
   border-bottom: 1px solid var(--border);
 }
@@ -1106,10 +1113,12 @@ body::before {
   font-family: var(--font-serif);
   font-size: 14px; font-weight: normal;
   letter-spacing: 3px; color: var(--accent);
+  overflow-wrap: anywhere;
 }
+.modal-head .icon-btn { flex: none; }
 
 .modal-body {
-  flex: 1 1 auto; overflow-y: auto;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
   padding: 18px;
   display: flex; flex-direction: column; gap: 20px;
 }
@@ -1119,6 +1128,11 @@ body::before {
   border-top: 1px solid var(--border);
   display: flex; align-items: center; justify-content: flex-end; gap: 10px;
 }
+.modal-foot > :is(.hint, .test-result) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.modal-foot > .btn { flex: none; }
 
 /* 表单 */
 .field-group { display: flex; flex-direction: column; gap: 12px; }
@@ -1149,7 +1163,7 @@ body::before {
 }
 .sk-reset-all:active { background: rgba(var(--accent-rgb), .2); }
 
-.field { display: flex; flex-direction: column; gap: 5px; }
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .field > span { font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; }
 .field input, .field textarea {
   background: var(--bg-input);
@@ -1298,12 +1312,13 @@ body::before {
   display: flex;
   flex-direction: column;
   gap: 22px;
-  padding-right: 4px;
+  padding: 5px;
 }
 
 @media (max-width: 1100px) {
   .setup-grid {
     grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: max-content;
     overflow-y: auto;
   }
   .setup-col { overflow: visible; }
@@ -1447,7 +1462,7 @@ body::before {
 .tm-opt.on { border-color: var(--accent); color: var(--accent); background: var(--bg-selected); }
 
 .module-actions {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
 }
 .hint { font-size: 11px; color: var(--ink-faint); }
 
@@ -1509,7 +1524,7 @@ body::before {
 .modal.xwide { width: min(980px, 96vw); }
 .modal.char-editor { max-height: 92vh; display: flex; flex-direction: column; }
 
-.ce-head-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.ce-head-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-wrap: wrap; }
 .btn.sm { padding: 4px 10px; font-size: 11.5px; }
 .btn.ai { border-color: var(--accent-soft); color: var(--accent); }
 .btn.ai:disabled { opacity: .5; cursor: not-allowed; }
@@ -1529,8 +1544,9 @@ body::before {
 .ce-body { overflow-y: auto; flex: 1; min-height: 0; }
 
 /* 三列 / 两列表单 */
-.field-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 14px; }
-.field-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 14px; }
+.field-grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 14px; }
+.field-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+.field .pair input { min-width: 0; }
 
 .attr-cell {
   background: var(--bg-raised); border: 1px solid var(--border-soft);
@@ -1558,14 +1574,14 @@ body::before {
 }
 .derived-grid .dv small { font-size: 9px; color: var(--ink-faint); }
 
-.ce-skill-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 14px; }
+.ce-skill-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr)); gap: 4px 14px; }
 .ce-skill-row {
   /* 每行是独立 grid，自定义框那列必须定宽，否则有/无输入框的行列宽不同、上下对不齐 */
-  display: grid; grid-template-columns: 1fr 76px auto 62px;
+  display: grid; grid-template-columns: minmax(0, 1fr) 76px auto 62px;
   align-items: center; gap: 6px;
   padding: 3px 0; border-bottom: 1px solid rgba(var(--edge-rgb), .03);
 }
-.ce-skill-row .sk-name { font-size: 11.5px; color: var(--ink-dim); white-space: nowrap; }
+.ce-skill-row .sk-name { font-size: 11.5px; color: var(--ink-dim); overflow-wrap: anywhere; }
 .ce-skill-row .sk-warn { color: var(--accent); font-style: normal; font-size: 10px; }
 .ce-skill-row .sk-custom {
   box-sizing: border-box; width: 100%;
@@ -1584,6 +1600,7 @@ body::before {
   background: var(--bg-input);
 }
 .sk-stepper:focus-within { border-color: var(--accent-soft); }
+.modal .sk-stepper :is(button, input):focus-visible { outline-offset: -2px; }
 .ce-skill-row .sk-val {
   width: 40px; border: 0; border-radius: 0;
   background: transparent; color: var(--ink);
