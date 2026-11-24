@@ -27,6 +27,7 @@ const REQUIRED = [
   '/src/motif-art.css',
   '/src/tentacle.css',
   '/src/ritual.css',
+  '/src/investigator.css',
   '/src/rulebook.html',
   '/src/ui/theme.js',
   '/src/modals/settings.js',
@@ -36,10 +37,10 @@ const REQUIRED = [
   '/preload.js'
 ];
 
-for (const file of ['src/tentacle.css', 'src/ritual.css']) {
+for (const file of ['src/tentacle.css', 'src/ritual.css', 'src/investigator.css']) {
   if (!norm.has('/' + file)) continue;
   const themeCss = asar.extractFile(ASAR, file).toString('utf8');
-  for (const [, path] of themeCss.matchAll(/url\('(assets\/(?:tentacle|ritual)\/[\w-]+\.webp)'\)/g)) {
+  for (const [, path] of themeCss.matchAll(/url\('(assets\/(?:tentacle|ritual|investigator)\/[\w-]+\.webp)'\)/g)) {
     const entry = '/src/' + path;
     if (!REQUIRED.includes(entry)) REQUIRED.push(entry);
   }

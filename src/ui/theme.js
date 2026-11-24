@@ -15,6 +15,13 @@ export const THEMES = [
     swatch: ['#efc37a', '#110e0b', '#251e15']
   },
   {
+    id: 'investigator',
+    name: '调查员 · 月下卷宗',
+    motif: '旧纸与夜色',
+    desc: '月夜木屋、黄铜罗盘与随身调查笔记。',
+    swatch: ['#edc783', '#111821', '#26312b']
+  },
+  {
     id: 'pixel',
     name: '像素写实',
     motif: '经典备份',

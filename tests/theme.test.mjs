@@ -39,7 +39,7 @@ function eq(a, b, n) { ok(a === b, `${n}（期望 ${JSON.stringify(b)}，实际 
 // ---------------------------------------------------------------------------
 console.log('\n== 主题清单 ==');
 
-eq(THEME_IDS.join(','), 'tentacle,ritual,pixel', '设置提供触手、仪式和像素写实备份');
+eq(THEME_IDS.join(','), 'tentacle,ritual,investigator,pixel', '设置提供三个设计主题和像素写实备份');
 eq(DEFAULT_THEME, 'tentacle', '新配置默认启用触手主题');
 eq(new Set(THEME_IDS).size, THEMES.length, '主题 id 不重复');
 ok(THEME_IDS.includes(DEFAULT_THEME), '默认主题在清单里');
@@ -149,6 +149,7 @@ const themesCss = await readFile(new URL('../src/themes.css', import.meta.url), 
 const stylesCss = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 const tentacleCss = await readFile(new URL('../src/tentacle.css', import.meta.url), 'utf8');
 const ritualCss = await readFile(new URL('../src/ritual.css', import.meta.url), 'utf8');
+const investigatorCss = await readFile(new URL('../src/investigator.css', import.meta.url), 'utf8');
 const motifCss = await readFile(new URL('../src/motif-art.css', import.meta.url), 'utf8');
 
 // 这条是防「拼错一个字母」的：id 写错了不会报错，
@@ -478,7 +479,7 @@ ok(/\.panel\s*\{[^}]*backdrop-filter:\s*blur\(var\(--panel-blur/.test(stripped),
 ok(/\.modal\s*\{[^}]*backdrop-filter:\s*blur\(var\(--panel-blur/.test(stripped), '.modal 有背景模糊');
 
 // 主题专用补丁块必须存在：那些用变量表达不了的差异都在里面
-for (const [id, css] of [['pixel', stripped], ['tentacle', tentacleCss], ['ritual', ritualCss]]) {
+for (const [id, css] of [['pixel', stripped], ['tentacle', tentacleCss], ['ritual', ritualCss], ['investigator', investigatorCss]]) {
   ok(new RegExp(`\\[data-theme="${id}"\\][^{]*\\{`).test(css),
     `布局样式有 [data-theme="${id}"] 的专用补丁`);
 }
@@ -487,6 +488,7 @@ ok(stripped.includes('repeating-linear-gradient'), '像素写实保留断续线�
 ok(tentacleCss.includes('prefers-reduced-motion: reduce'), '触手主题遵循减少动态效果偏好');
 ok(/@media \(prefers-reduced-motion: no-preference\)[\s\S]*?ui-light-reveal/.test(stripped), '主题入场灯光只在允许动效时播放');
 ok(!/animation:[^;]*infinite/.test(ritualCss), '仪式主题的装饰没有持续播放的动画');
+ok(!/animation:[^;]*infinite/.test(investigatorCss), '调查员主题的装饰没有持续播放的动画');
 
 // 高频出现的队友发言不能用语义绿底：
 // 一局几十条绿块会把视线从 KP 叙述上抢走。
@@ -565,6 +567,7 @@ const indexHtml = await readFile(new URL('../src/index.html', import.meta.url), 
 ok(indexHtml.includes('themes.css'), 'index.html 引入了 themes.css');
 ok(indexHtml.indexOf('tentacle.css') > indexHtml.indexOf('styles.css'), '触手样式加载在共用样式之后');
 ok(indexHtml.indexOf('ritual.css') > indexHtml.indexOf('styles.css'), '仪式样式加载在共用样式之后');
+ok(indexHtml.indexOf('investigator.css') > indexHtml.indexOf('styles.css'), '调查员样式加载在共用样式之后');
 ok(indexHtml.includes('motif-art.css'), 'index.html 引入了 motif-art.css（--art-* 素材的来源）');
 ok(/<html[^>]*data-theme=/.test(indexHtml), 'index.html 的 <html> 有 data-theme 兜底');
 ok(/<html[^>]*data-read-width=/.test(indexHtml), 'index.html 的 <html> 有 data-read-width 兜底');
