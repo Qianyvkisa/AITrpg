@@ -19,6 +19,7 @@
 import {
   AUTO_ADVANCE_MAX_TURNS,
   AUTO_RECOVER_MAX,
+  MODULE_AUTO_ADVANCE_MAX_TURNS,
   autoAdvanceBlocker,
   blockerMessage,
   clampDelay,
@@ -180,6 +181,15 @@ export function createAutoAdvanceRunner({
     failureCount = 0;
   }
 
+  function pauseModuleAtLimit() {
+    const state = readAutoAdvanceState(getState());
+    if (!state.autoAdvance || state.ended || state.maxTurns !== MODULE_AUTO_ADVANCE_MAX_TURNS) return false;
+    if (state.turns < state.maxTurns) return false;
+    stop(null);
+    notify(`【模组自动推进已暂停】已连续尝试 ${MODULE_AUTO_ADVANCE_MAX_TURNS} 轮。请查看当前调查进度，再手动推进或重新开启自动推进。`);
+    return true;
+  }
+
   /**
    * 安排下一次自动推进。
    * 已经在跑或已关闭时是安全的空操作（内部会先 cancel 旧定时器）。
@@ -211,6 +221,7 @@ export function createAutoAdvanceRunner({
       // 定时器排队期间状态变了（玩家关了开关 / 剧情结束 / 冒出待掷骰）
       if (isTerminalBlocker(b)) stop(b);
       else if (b === 'max-turns') {
+        if (pauseModuleAtLimit()) return;
         // 连续推进到上限：停下并说明，但**不关开关**。
         // 玩家手动推一次就会清零计数、自动继续（见 resetRunCount 的说明）。
         notify(`【自动推进已暂停】连续推进达到 ${AUTO_ADVANCE_MAX_TURNS} 轮，`
@@ -238,7 +249,7 @@ export function createAutoAdvanceRunner({
     // 跑完一轮后接上下一轮。
     // 用 resume() 而不是 schedule()：resume 是幂等的，
     // 如果 runTurn 内部（每轮结束处）已经排好了定时器，这里不会重置倒计时。
-    if (getState()?.autoAdvance) resume();
+    if (!pauseModuleAtLimit() && getState()?.autoAdvance) resume();
   }
 
   /**

@@ -1,3 +1,5 @@
+import { readModuleGuide } from './moduleGuide.js';
+
 // ---------------------------------------------------------------------------
 // 内置模组：随程序分发，不需要用户导入
 //
@@ -94,6 +96,13 @@ export function openingFor(module, mode = 'player') {
     return mode === 'spectator' && module.openingSpectator
       ? module.openingSpectator
       : module.opening;
+  }
+  if (module) {
+    const opening = readModuleGuide(module)?.opening;
+    if (opening) return opening;
+    return mode === 'spectator'
+      ? '本次调查即将开始。点击「推进」，由守密人按模组交代开场。'
+      : '本次调查即将开始。可以先询问现场情况，由守密人按模组交代开场。';
   }
   // 没选模组：自由创作的开场。
   // 注意这里不能复用「旧宅疑影」的文案——那是内置模组的专属开场，

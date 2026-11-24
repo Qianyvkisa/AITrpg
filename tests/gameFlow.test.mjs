@@ -14,6 +14,8 @@ import { applySnapshot, buildSnapshot, turnCount } from '../src/persistence.js';
 import { hasRunTurn, menuButtonVisibility } from '../src/ui/menu.js';
 import { generateTeammateAction, pickActingTeammates } from '../src/services/teammateAct.js';
 import { applyRoomState, mergeRoomMessages, publicMessage, publicRoomState, rollOwner, roomHistory } from '../src/core/onlineSession.js';
+import { BUILTIN_MODULES, openingFor } from '../src/core/builtinModules.js';
+import { openingSceneFor, readModuleGuide } from '../src/core/moduleGuide.js';
 
 function fixedDice(digits, run) {
   const oldRandom = Math.random;
@@ -370,6 +372,89 @@ test('旧线索、NPC 约定和模组后段能在读档后被当前调查找回'
   delete legacy.state.scenario.investigation;
   applySnapshot(loaded, legacy);
   assert.ok(loaded.scenario.investigation.some((entry) => entry.text.includes('老徐：带银鹿船票')));
+});
+
+test('导入模组优先使用原稿开场和终局，不把 AI 场景索引当作路线', () => {
+  const module = {
+    understanding: {},
+    raw: `场景流程：推测的路径 → 推测的结尾\n===== 以下为原始素材（供查阅）=====\n场景流程：港口 → 灯塔（终局）\n开场白：雾里有人在敲钟。\n### 背景资料\n${'无关背景。\n\n'.repeat(2600)}\n终局：须确认灯塔信号的来历。`
+  };
+  assert.deepEqual(readModuleGuide(module).route, ['港口', '灯塔']);
+  assert.equal(openingSceneFor(module), '港口');
+  assert.equal(openingFor(module), '雾里有人在敲钟。');
+  assert.deepEqual(readModuleGuide({ ...module, raw: '场景流程：推测的路径 → 推测的结尾' }).route, []);
+  assert.deepEqual(readModuleGuide({ raw: '场景流程：甲 → 乙\n场景流程：甲 → 丙' }).route, []);
+  const state = createInitialState();
+  state.module = module;
+  state.scenario.scene = '港口';
+  const [system] = createEngine(state).buildKeeperMessages();
+  assert.match(system.content, /原稿路线：港口 → 灯塔/);
+  assert.match(system.content, /原稿终局条件.*\n须确认灯塔信号的来历/);
+});
+
+test('守密人重写违规草稿且不发布其中的旁白、线索或伤害，按相邻场景推进后结团', async () => {
+  const state = createInitialState();
+  state.module = BUILTIN_MODULES[0];
+  state.scenario.scene = openingSceneFor(state.module);
+  state.playerChar = createCharacter({ name: '林默', isPlayer: true });
+  const health = state.playerChar.hp.current;
+  const replies = [
+    '虚构支线。[[HP:-4]][[CLUE:虚构线索]][[SCENE:外星飞船]]',
+    '进入走廊。[[SCENE:走廊]]', '走向阁楼。[[SCENE:阁楼]]',
+    '进入最后一处。[[SCENE:地下室]][[END:未查明就结束]]',
+    '下到地下室。[[SCENE:地下室]]', '调查告一段落。[[END:完成封镇]]'
+  ];
+  let onChunk;
+  let calls = 0;
+  const engine = new GameEngine(state, {
+    onChunk(fn) { onChunk = fn; return () => { onChunk = null; }; },
+    async chat({ messages, requestId }) {
+      if (calls === 1 || calls === 4) assert.match(messages[0].content, /重写上一个草稿/);
+      assert.doesNotMatch(JSON.stringify(messages), /虚构支线|虚构线索|未查明就结束/);
+      calls++;
+      onChunk({ requestId, delta: replies.shift() });
+      return { ok: true, text: '' };
+    }
+  });
+  engine.on(ev => assert.notEqual(ev.type, 'stream-chunk', '模组草稿不可流入界面'));
+  for (const action of ['走向走廊', '上楼去阁楼', '下到地下室', '完成封镇']) {
+    assert.equal((await engine.takeTurn(action)).ok, true);
+  }
+  assert.deepEqual(state.messages.filter(m => m.role === 'scene').map(m => m.text), [
+    '【场景】走廊', '【场景】阁楼', '【场景】地下室', '【模组结束】完成封镇'
+  ]);
+  assert.doesNotMatch(JSON.stringify(state.messages), /虚构支线|虚构线索|未查明就结束/);
+  assert.equal(state.playerChar.hp.current, health);
+  assert.equal(state.turns, 4);
+  assert.equal(state.scenario.ended, true);
+  assert.equal(calls, 6);
+});
+
+test('连续偏离模组后暂停，读档继续同一行动且不会保留越级换场', async () => {
+  const state = createInitialState();
+  state.module = { raw: '场景流程：甲 → 乙 → 丙（终局）' };
+  state.scenario.scene = '甲';
+  let calls = 0;
+  const engine = createEngine(state, async () => ({
+    ok: true, text: ++calls === 1 ? '走了捷径。[[SCENE:丙]]' : '调查结束。[[END:任意结局]]'
+  }));
+  assert.equal((await engine.takeTurn('出发')).ok, false);
+  assert.equal(calls, 2);
+  assert.equal(state.turns, 0);
+  assert.equal(state.scenario.scene, '甲');
+  assert.equal(state.scenario.ended, false);
+  assert.ok(state.keeperContinuation.moduleCorrection);
+  assert.doesNotMatch(JSON.stringify(state.messages), /走了捷径|任意结局/);
+  const restored = applySnapshot(createInitialState(), storedSnapshot(state));
+  const retry = createEngine(restored, async ({ messages }) => {
+    assert.match(messages[0].content, /重写上一个草稿/);
+    assert.equal(messages.filter(m => m.content === '出发').length, 1);
+    return { ok: true, text: '前往乙。[[SCENE:乙]]' };
+  });
+  assert.equal((await retry.takeTurn('')).ok, true);
+  assert.equal(restored.scenario.scene, '乙');
+  assert.equal(restored.keeperContinuation, null);
+  assert.equal(restored.turns, 1);
 });
 
 test('联机可认领、掷骰并用同一条消息 ID 更新公开结果', async () => {

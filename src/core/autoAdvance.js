@@ -22,6 +22,7 @@
  * 现在改成连续计数 + 可恢复，它才真正只拦「失控空转」这一种情况。
  */
 export const AUTO_ADVANCE_MAX_TURNS = 1000;
+export const MODULE_AUTO_ADVANCE_MAX_TURNS = 12;
 
 /** 推进间隔的允许范围（毫秒）：太快像刷屏，太慢玩家以为卡死 */
 export const MIN_DELAY = 500;
@@ -198,12 +199,14 @@ export function clampDelay(ms, fallback = DEFAULT_DELAY) {
  * 单独抽出来是为了让 app.js 的调用点短一点，也方便测试直接喂 state。
  */
 export function readAutoAdvanceState(state, { busy = false, pendingRoll = false } = {}) {
+  const raw = state?.module?.raw;
   return {
     mode: state?.mode || 'player',
     autoAdvance: !!state?.autoAdvance,
     busy: !!busy,
     ended: !!state?.scenario?.ended,
     pendingRoll: !!pendingRoll,
+    maxTurns: typeof raw === 'string' && raw.trim() ? MODULE_AUTO_ADVANCE_MAX_TURNS : AUTO_ADVANCE_MAX_TURNS,
     // 用「连续自动推进轮数」而不是整局 turns。
     // 整局轮数当上限会误伤：玩到 200 轮就再也开不了自动推进。
     turns: Number(state?.autoAdvanceRun) || 0

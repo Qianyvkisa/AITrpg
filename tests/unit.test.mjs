@@ -781,7 +781,7 @@ group('moduleFromUnderstanding 组装模组底稿', () => {
   ok(txt.includes('玛莎'), '含 NPC');
   ok(txt.includes('藏钥匙'), '含 NPC 秘密');
   ok(txt.includes('火漆信'), '含线索');
-  ok(txt.includes('书房 → 走廊'), '场景用箭头连接');
+  ok(txt.includes('场景索引：书房、走廊'), 'AI 提取的场景只作为索引');
   ok(txt.includes('回声'), '含威胁');
   ok(txt.includes('地图是手绘'), '含备注');
   ok(txt.includes('原始素材'), '附原始素材');

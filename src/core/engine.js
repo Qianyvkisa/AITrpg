@@ -13,6 +13,7 @@ import { cancelPendingRoll, getHandler, pendingCharacter, rollBlocker, rollPendi
 import { incapacity, partyEnding } from './vitals.js';
 import { compactHistory, DEFAULT_HISTORY_BUDGET } from './contextBudget.js';
 import { rememberInvestigation, selectInvestigation, selectModuleText } from './investigation.js';
+import { checkModuleReply, describeModuleProgress, readModuleGuide } from './moduleGuide.js';
 
 /** 单轮最多自动续跑几次，防止 AI 反复请求检定导致无限循环 */
 const MAX_CHAIN = 3;
@@ -105,7 +106,7 @@ export class GameEngine {
   // -------------------------------------------------------------------------
   // 组装给 KP 的上下文
   // -------------------------------------------------------------------------
-  buildKeeperMessages() {
+  buildKeeperMessages(guide = readModuleGuide(this.state.module), correction = '') {
     const s = this.state;
     const playerChar = s.playerChar ? characterToPrompt(s.playerChar, { full: true }) : '';
     const aiTeammates = (s.teammates || []).filter((t) => !this.rollOwner?.(t));
@@ -119,7 +120,10 @@ export class GameEngine {
     const companions = (s.companions || []).map((c) => characterToPrompt(c, { full: false }));
 
     const sys = keeperSystemPrompt({
-      module: selectModuleText(s.module?.raw, focus),
+      module: guide ? selectModuleText(guide.source, focus) : '',
+      moduleReference: guide?.reference.slice(0, 3200),
+      moduleProgress: describeModuleProgress(guide, s.scenario.scene),
+      moduleCorrection: correction || s.keeperContinuation?.moduleCorrection,
       investigation: selectInvestigation(s.scenario, focus),
       scenario: s.scenario,
       playerChar,
@@ -137,7 +141,7 @@ export class GameEngine {
 
     const recent = s.messages
       .filter((m) =>
-        m.role === 'user' || (m.role === 'keeper' && !m.error) || m.role === 'system-result' ||
+        m.role === 'user' || (m.role === 'keeper' && !m.error && !m.streaming) || m.role === 'system-result' ||
         // 队友自主行动也要进 KP 的上下文，否则 KP 不知道队友做了什么，
         // 会自己再编一套队友行动——那正是要消灭的「一人分饰多角」
         m.role === 'teammate-action'
@@ -213,51 +217,75 @@ export class GameEngine {
     return this.runKeeper();
   }
 
-  async runKeeper() {
-    const s = this.state;
-    if (s.scenario.ended) return false;
+  async requestKeeper(messages, onChunk) {
     const rid = ++this.requestId;
-
-    // 先构建上下文，再把占位消息放进历史，
-    // 否则这条还是空字符串的 keeper 消息会被当成历史喂给 AI。
-    const messages = this.buildKeeperMessages();
-
-    const msg = this.pushMessage({ role: 'keeper', text: '', streaming: true });
-    this.emit({ type: 'stream-start', messageId: msg.id });
-
+    let draft = '';
     const off = this.api.onChunk(({ requestId, delta }) => {
       if (requestId !== rid) return;
-      msg.text += delta;
-      this.emit({ type: 'stream-chunk', messageId: msg.id });
+      draft += delta;
+      onChunk(draft);
     });
-
-    let res;
     try {
-      res = await this.api.chat({
-        ...s.apiConfig,
+      const res = await this.api.chat({
+        ...this.state.apiConfig,
         stream: true,
         messages,
         purpose: 'keeper',
         requestId: rid
       });
+      if (res.ok) this.recordUsage(res.usage);
+      return { ...res, text: res.text || draft };
     } catch (e) {
-      res = { ok: false, error: e?.message || String(e) };
+      return { ok: false, error: e?.message || String(e) };
     } finally {
       off();
-      msg.streaming = false;
+    }
+  }
+
+  async runKeeper() {
+    const s = this.state;
+    if (s.scenario.ended) return false;
+    const guide = readModuleGuide(s.module);
+    const live = guide ? null : this.pushMessage({ role: 'keeper', text: '', streaming: true });
+    if (live) this.emit({ type: 'stream-start', messageId: live.id });
+
+    let res;
+    let parsed;
+    let correction = '';
+    // 模组草稿验证通过前只显示等待状态。失败只重写一次，避免消耗失控。
+    for (let attempt = 0; attempt < (guide ? 2 : 1); attempt++) {
+      res = await this.requestKeeper(this.buildKeeperMessages(guide, correction), draft => {
+        if (!live) return;
+        live.text = draft;
+        this.emit({ type: 'stream-chunk', messageId: live.id });
+      });
+      if (!res.ok) break;
+      parsed = parseDirectives(res.text);
+      correction = guide ? checkModuleReply(guide, s.scenario.scene, parsed) : '';
+      if (!correction) break;
+    }
+    if (res.ok && correction) {
+      s.keeperContinuation = { ...s.keeperContinuation, moduleCorrection: correction };
+      this.lastError = '守密人回复未通过模组流程校验。';
+      this.pushMessage({ role: 'keeper', error: true, text: '【叙事已暂停】守密人回复未通过模组流程校验。已保留本轮行动与检定结果，可点击「继续叙事」。' });
+      return false;
     }
 
     if (!res.ok) {
       // 优先用主进程给出的「人话」说明（friendly），它会把 HTTP 502 这类
       // 网关故障翻译成玩家看得懂的话；没有就退回原始错误。
-      msg.text = res.canceled
+      const text = res.canceled
         ? '【已取消】'
         : `【KP 连接失败】${res.friendly || res.error}`;
-      msg.error = true;
       // 记在实例上，让 takeTurn 能把「人话」一路带到界面层。
       // 用字段而不是改返回值，是为了不破坏 playerAction 返回 boolean 的既有契约。
       this.lastError = res.friendly || res.error || '';
-      this.emit({ type: 'stream-end', messageId: msg.id });
+      if (live) {
+        Object.assign(live, { text, error: true, streaming: false });
+        this.emit({ type: 'stream-end', messageId: live.id });
+      } else {
+        this.pushMessage({ role: 'keeper', text, error: true });
+      }
       // 返回 false 让上层知道「这一轮其实没跑成」。
       // 自动推进依赖这个信号：API 挂了却当成正常轮次，会一路空转失败请求。
       return false;
@@ -266,20 +294,14 @@ export class GameEngine {
     this.lastError = '';
     s.keeperContinuation = null;
 
-    // 累计 token 用量。上游在流末尾自报 usage（见 llm.js readStream），
-    // 这是唯一能拿到真实消耗的途径——网关没有余额查询接口。
-    this.recordUsage(res.usage);
-
-    msg.text = res.text || msg.text;
-    this.emit({ type: 'stream-end', messageId: msg.id });
-
-    const { directives, clean, says } = parseDirectives(msg.text);
-    msg.clean = clean;
-    msg.directives = directives;
-    msg.says = says;
+    const { directives, clean, says } = parsed;
     // 切成旁白 / NPC 台词片段，渲染层按它拆气泡
-    msg.segments = splitNarration(msg.text);
-    this.emit({ type: 'message-updated', message: msg });
+    const settled = { text: res.text, clean, directives, says, segments: splitNarration(res.text), streaming: false };
+    const msg = live ? Object.assign(live, settled) : this.pushMessage({ role: 'keeper', ...settled });
+    if (live) {
+      this.emit({ type: 'stream-end', messageId: msg.id });
+      this.emit({ type: 'message-updated', message: msg });
+    }
 
     // 同一条消息里的指令只结算一次（防止重复扣血 / 扣 SAN）
     const scene = s.scenario.scene;

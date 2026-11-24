@@ -39,6 +39,15 @@ const MAX_IMAGE_TOTAL_BYTES = 24 * 1024 * 1024;
 /** 扫描时最多下钻多少层，防止误选整个磁盘（模组常见 素材/章节/子章节 多层嵌套） */
 const MAX_DEPTH = 12;
 
+function clipMaterial(text, limit) {
+  if (text.length <= limit) return text;
+  const omission = '\n…（中间部分过长已截断）\n';
+  if (limit <= omission.length) return text.slice(0, limit);
+  const tail = Math.max(1, Math.floor((limit - omission.length) / 3));
+  // 模组的开场通常在前，终局与结局条件通常在末尾。
+  return text.slice(0, limit - omission.length - tail) + omission + text.slice(-tail);
+}
+
 function extOf(p) {
   return path.extname(p).toLowerCase();
 }
@@ -336,7 +345,7 @@ async function readFolder(folder, opts = {}) {
   // 单文件超长先各自截断
   for (const d of docs) {
     if (d.text.length > MAX_CHARS_PER_FILE) {
-      d.text = d.text.slice(0, MAX_CHARS_PER_FILE) + '\n…（本文件过长已截断）';
+      d.text = clipMaterial(d.text, MAX_CHARS_PER_FILE);
     }
   }
 
@@ -347,7 +356,7 @@ async function readFolder(folder, opts = {}) {
     for (const d of docs) {
       if (acc >= MAX_CHARS_TOTAL) { d.text = ''; continue; }
       const room = MAX_CHARS_TOTAL - acc;
-      if (d.text.length > room) d.text = d.text.slice(0, room) + '\n…（内容过长已截断）';
+      d.text = clipMaterial(d.text, room);
       acc += d.text.length;
     }
   }
@@ -448,21 +457,21 @@ async function readSingleFile(p) {
   if (DOCX_EXT.has(ext)) {
     const r = readDocx(p);
     return r.ok
-      ? { docs: [{ rel, kind: 'word', text: r.text.slice(0, MAX_CHARS_PER_FILE) }], images: [], skipped: [] }
+      ? { docs: [{ rel, kind: 'word', text: clipMaterial(r.text, MAX_CHARS_PER_FILE) }], images: [], skipped: [] }
       : { docs: [], images: [], skipped: [{ rel, reason: r.error }] };
   }
   if (PDF_EXT.has(ext)) {
     const r = await readPdf(p);
     return r.ok
-      ? { docs: [{ rel, kind: 'pdf', text: r.text.slice(0, MAX_CHARS_PER_FILE) }], images: [], skipped: [] }
+      ? { docs: [{ rel, kind: 'pdf', text: clipMaterial(r.text, MAX_CHARS_PER_FILE) }], images: [], skipped: [] }
       : { docs: [], images: [], skipped: [{ rel, reason: r.error }] };
   }
   if (TEXT_EXT.has(ext)) {
-    const text = fs.readFileSync(p, 'utf8').slice(0, MAX_CHARS_PER_FILE);
+    const text = clipMaterial(fs.readFileSync(p, 'utf8'), MAX_CHARS_PER_FILE);
     return { docs: [{ rel, kind: 'text', text }], images: [], skipped: [] };
   }
   if (HTML_EXT.has(ext)) {
-    return { docs: [{ rel, kind: 'html', text: readHtml(p).slice(0, MAX_CHARS_PER_FILE) }], images: [], skipped: [] };
+    return { docs: [{ rel, kind: 'html', text: clipMaterial(readHtml(p), MAX_CHARS_PER_FILE) }], images: [], skipped: [] };
   }
   if (IMAGE_EXT.has(ext)) {
     const buf = fs.readFileSync(p);
@@ -498,9 +507,7 @@ function materialsToPromptText(parsed, { maxChars = MAX_CHARS_TOTAL } = {}) {
     parts.push(`### 未纳入的文件\n${list}`);
   }
 
-  let text = parts.join('\n\n');
-  if (text.length > maxChars) text = text.slice(0, maxChars) + '\n…（素材过长已截断）';
-  return text;
+  return clipMaterial(parts.join('\n\n'), maxChars);
 }
 
 module.exports = {

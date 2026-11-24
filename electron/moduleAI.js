@@ -25,7 +25,7 @@ function buildUnderstandPrompt({ folderName, materialsText, imageCount }) {
 你的任务是通读并理解它们，整理成一份结构化的模组底稿。
 
 要求：
-1. 忠于原材料。不要凭空编造与原素材冲突的剧情、NPC 或真相；素材没写的地方可以合理补全，但要自然衔接。
+1. 忠于原材料。剧情流程、NPC、证据、真相和结局须有原文或图片依据；缺失的要点标为未交代，保留原有分支和条件。
 2. 图片要看懂：地图上的房间布局、手绘标注、照片里的物件与文字，都要纳入模组（例如地图要转写成文字版场景布局）。
 3. 如果多份材料互相矛盾，以正文主线为准，并在"备注"里说明矛盾点。
 4. 输出必须是严格的 JSON，不要有任何多余文字、不要包在代码块里。
@@ -344,7 +344,7 @@ function moduleFromUnderstanding(u, { folderName, materialsText }) {
   }
 
   if (Array.isArray(u.scenes) && u.scenes.length) {
-    lines.push(`\n场景流程：${u.scenes.join(' → ')}`);
+    lines.push(`\n场景索引：${u.scenes.join('、')}`);
   }
 
   if (u.threat) lines.push(`\n主要威胁：${u.threat}`);
@@ -353,7 +353,7 @@ function moduleFromUnderstanding(u, { folderName, materialsText }) {
   // 附上原始素材，方便 KP 追问细节
   if (materialsText) {
     lines.push('\n\n===== 以下为原始素材（供查阅）=====\n');
-    lines.push(materialsText.slice(0, 40000));
+    lines.push(materialsText);
   }
 
   return lines.join('\n');

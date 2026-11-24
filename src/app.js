@@ -31,6 +31,7 @@ import { buildSession } from './core/session.js';
 import { createAutoAdvanceRunner } from './core/autoAdvanceRunner.js';
 import { openingFor } from './core/builtinModules.js';
 import { buildReplay, replayFileName } from './core/replay.js';
+import { openingSceneFor } from './core/moduleGuide.js';
 import { applyAppearance } from './ui/theme.js';
 import { applyRoomState, claimedCharacter, mergeRoomMessages, publicMessage, publicRoomState, rollOwner, roomHistory } from './core/onlineSession.js';
 import { incapacity } from './core/vitals.js';
@@ -367,7 +368,8 @@ async function spectatorAdvance(opts = {}) {
       // 「每次抖动都要我手动点一下」。
       const friendly = res.error || '模型服务暂时不可用';
       failed = true;
-      autoRunner.recoverAfterFailure(friendly);
+      if (state.keeperContinuation?.moduleCorrection) stopAutoAdvance(null);
+      else autoRunner.recoverAfterFailure(friendly);
       return;
     }
     // 这一轮成功：清零失败计数，下次故障重新有完整的重试预算
@@ -1349,7 +1351,7 @@ function addOpening(module, mode = 'player') {
   const w = { id: 'welcome', role: 'keeper', text: intro, clean: intro };
   state.messages.push(w);
 
-  state.scenario.scene = module?.scene || '未知之处';
+  state.scenario.scene = openingSceneFor(module);
   state.scenario.events.push(
     module ? `开场：进入《${module.title}》` : '开场：自由创作'
   );

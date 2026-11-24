@@ -16,7 +16,7 @@
 // ---------------------------------------------------------------------------
 
 import { createAutoAdvanceRunner } from '../src/core/autoAdvanceRunner.js';
-import { DEFAULT_DELAY, MIN_DELAY, MAX_DELAY, AUTO_ADVANCE_MAX_TURNS } from '../src/core/autoAdvance.js';
+import { DEFAULT_DELAY, MIN_DELAY, MAX_DELAY, AUTO_ADVANCE_MAX_TURNS, MODULE_AUTO_ADVANCE_MAX_TURNS } from '../src/core/autoAdvance.js';
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -259,6 +259,21 @@ console.log('\n== 轮数上限：停掉并提示 ==');
 }
 
 // ---------------------------------------------------------------------------
+console.log('\n== 模组连续自动推进需要确认当前进度 ==');
+
+{
+  const h = makeHarness({ module: { raw: '场景流程：港口 → 灯塔' } });
+  h.runner.toggle();
+  h.state.autoAdvanceRun = MODULE_AUTO_ADVANCE_MAX_TURNS - 1;
+  await h.fireTimer();
+  eq(h.state.autoAdvanceRun, MODULE_AUTO_ADVANCE_MAX_TURNS, '到达模组连续轮数上限');
+  eq(h.state.autoAdvance, false, '模组自动推进已暂停');
+  eq(h.pendingTimers(), 0, '暂停后无下一次调用');
+  ok(h.notes.some((n) => n.includes('当前调查进度')), '提示查看进度');
+  h.runner.toggle();
+  eq(h.pendingTimers(), 1, '玩家确认后可以重新开启');
+}
+
 console.log('\n== 定时器到点时剧情已结束：停掉不跑 ==');
 
 {
