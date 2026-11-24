@@ -1,4 +1,5 @@
 import { stripDirectivesForDisplay } from '../shared/text.js';
+import { publicNpcRoster } from './npcs.js';
 
 export function rollOwner(state, character) {
   return state.net.role === 'host' && character
@@ -29,14 +30,15 @@ export function publicMessage(state, message) {
 }
 
 export function publicRoomState(state, { ready, busy }) {
-  const { scene, clues, ended, ending } = state.scenario;
+  const { scene, clues, ended, ending, npcs } = state.scenario;
   return {
     ready, busy,
     continuation: ready && !!state.keeperContinuation,
     turns: ready ? state.turns : 0,
     playerChar: ready && state.playerChar ? publicCharacter(state.playerChar) : null,
     teammates: ready ? state.teammates.map(publicCharacter) : [],
-    scenario: ready ? { scene, clues, ended, ending } : { scene: '', clues: [], ended: false, ending: '' }
+    scenario: ready ? { scene, clues, ended, ending, npcs: publicNpcRoster(npcs) }
+      : { scene: '', clues: [], ended: false, ending: '', npcs: [] }
   };
 }
 

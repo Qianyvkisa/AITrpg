@@ -26,6 +26,7 @@ import {
 } from './ui/messages.js';
 import { openSettings, openModules, openCharEditor, openTeammateCreator, openSaves, openGameSetup, openCharLibrary } from './modals/index.js';
 import { openOnline } from './modals/online.js';
+import { openNpcRoster } from './modals/npcRoster.js';
 import { hasRunTurn, menuButtonVisibility } from './ui/menu.js';
 import { buildSession } from './core/session.js';
 import { createAutoAdvanceRunner } from './core/autoAdvanceRunner.js';
@@ -42,6 +43,7 @@ const state = createInitialState();
 
 let engine = null;
 let busy = false;
+let refreshNpcRoster = null;
 
 // ---------------------------------------------------------------------------
 // 界面切换
@@ -119,6 +121,7 @@ function enterGame() {
   resetPanelCache();
   renderAllMessages(state.messages);
   renderAll(state, panelHandlers);
+  refreshNpcRoster?.();
   renderScene(state);
   applyModeToComposer();
   // 读档进来时可能还有没掷的骰，要把输入区锁上
@@ -550,6 +553,7 @@ function handleEngineEvent(ev) {
 
     case 'state-changed':
       renderAll(state, panelHandlers);
+      refreshNpcRoster?.();
       updateRollGate();
       publishRoomState();
       break;
@@ -963,7 +967,10 @@ function handleHostMessage(msg) {
     else renderMessage(message);
   }
   if (changes.length || msg.reset) scrollToBottom();
-  if (msg.state || msg.reset) renderAll(state, panelHandlers);
+  if (msg.state || msg.reset) {
+    renderAll(state, panelHandlers);
+    refreshNpcRoster?.();
+  }
   updateRollGate();
   if (msg.reset || previous?.ready !== state.net.room?.ready) onlinePanel?.refreshRoom();
 }
@@ -1012,6 +1019,13 @@ function bindUI() {
     openModules(state, () => { renderAll(state, panelHandlers); });
 
   $('#btnOnline').onclick = openOnlinePanel;
+
+  const npcRosterButton = $('#btnNpcRoster');
+  if (npcRosterButton) npcRosterButton.onclick = () => {
+    if (!refreshNpcRoster) {
+      refreshNpcRoster = openNpcRoster(state, npcRosterButton, () => { refreshNpcRoster = null; });
+    }
+  };
 
   $('#btnSaves').onclick = openSaveDialog;
 
@@ -1360,7 +1374,7 @@ async function autoSave() {
  * @param mode 'player' | 'spectator'
  */
 function addOpening(module, mode = 'player') {
-  const intro = openingFor(module, mode);
+  const intro = openingFor(module, mode, state.teammates);
 
   const w = { id: 'welcome', role: 'keeper', text: intro, clean: intro };
   state.messages.push(w);

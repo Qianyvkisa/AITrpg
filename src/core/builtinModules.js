@@ -41,12 +41,11 @@ export const BUILTIN_MODULES = [
 
 在你身后，走廊深处传来一声极轻的、像是有人拖着脚走路的响动。`,
 
-    // 旁观模式没有「你」，换成第一人称复数
-    openingSpectator: `深夜，三位调查员在朋友的旧宅里整理遗物。窗外雨声绵密，灯忽明忽暗。
+    openingSpectator: `深夜，调查员在朋友的旧宅里整理遗物。窗外雨声绵密，灯忽明忽暗。
 
 桌上有一封未拆的信，火漆印着一枚奇怪的、不像任何已知纹章的符号。
 
-走廊深处传来一声极轻的、像是有人拖着脚走路的响动。走在最后的人停住了脚步。`,
+走廊深处传来一声极轻的、像是有人拖着脚走路的响动。`,
 
     // 给 KP 的秘密底牌（玩家看不到）
     raw: `【旧宅疑影】
@@ -90,8 +89,15 @@ export function findBuiltinModule(id) {
  * 取一段开场白。
  * @param module 选中的模组（可为 null，即自由创作）
  * @param mode 'player' | 'spectator'
+ * @param teammates 本局已入队的调查员
  */
-export function openingFor(module, mode = 'player') {
+export function openingFor(module, mode = 'player', teammates = []) {
+  const names = teammates.map((ch) => String(ch?.name ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const subject = names.join('、') || '调查员';
+  if (mode === 'spectator' && module?.id === 'builtin-old-house') {
+    // 存档中也保存了模组副本，这里用当前内置文案。
+    return findBuiltinModule(module.id).openingSpectator.replace('调查员在', () => subject + '在');
+  }
   if (module?.opening) {
     return mode === 'spectator' && module.openingSpectator
       ? module.openingSpectator
@@ -108,7 +114,7 @@ export function openingFor(module, mode = 'player') {
   // 注意这里不能复用「旧宅疑影」的文案——那是内置模组的专属开场，
   // 自由创作要有自己的一段，否则不选模组也会看到旧宅的雨夜。
   return mode === 'spectator'
-    ? `雨夜，一间亮着灯的屋子里，几位调查员刚刚坐下。桌上的东西还没人敢碰。
+    ? `雨夜，一间亮着灯的屋子里，${subject}刚刚坐下。桌上的东西还没人敢碰。
 
 窗外有车灯扫过，随后熄了。没有人记得自己叫过车。`
     : `雨夜。你在一间不属于自己的房间里醒来，桌上摊着一份没写完的报告，墨迹还没干。
@@ -116,4 +122,16 @@ export function openingFor(module, mode = 'player') {
 窗外的车灯扫过去又扫回来，停在了楼下。没有人记得自己叫过车。
 
 楼梯间传来钥匙串碰撞的声音，一把一把地试。`;
+}
+
+/** 更新旧存档中程序生成的旁观开场，后续已经发生的叙事保留原文。 */
+export function restoreOpening(messages, module, mode, teammates) {
+  const opening = messages[0];
+  if (mode !== 'spectator' || opening?.id !== 'welcome' || opening.role !== 'keeper') return messages;
+  const oldBuiltIn = module?.id === 'builtin-old-house'
+    && opening.text?.startsWith('深夜，三位调查员在朋友的旧宅里整理遗物。');
+  const oldFree = !module && opening.text?.startsWith('雨夜，一间亮着灯的屋子里，几位调查员刚刚坐下。');
+  if (!oldBuiltIn && !oldFree) return messages;
+  const text = openingFor(module, mode, teammates);
+  return [{ ...opening, text, clean: text }, ...messages.slice(1)];
 }

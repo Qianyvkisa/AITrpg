@@ -16,7 +16,7 @@
  *   [[END: 结局描述]]                                    模组结束
  */
 
-const DIRECTIVE_RE = /\[\[(CHECK|SAN|DAMAGE|HP|MP|ITEM|FLAG|SCENE|END|NPC|TIME|CLUE):([^\]]*)\]\]/g;
+const DIRECTIVE_RE = /\[\[(CHECK|SAN|DAMAGE|HP|MP|ITEM|FLAG|SCENE|END|NPC|TIME|CLUE|SAY):([^\]]*)\]\]/g;
 
 /**
  * NPC 台词指令：[[SAY: 角色名 | 台词]]
@@ -59,18 +59,16 @@ function parseSayBody(body) {
 export function parseDirectives(text) {
   const directives = [];
   const says = [];
-  let clean = String(text ?? '');
-
-  // 先抽 NPC 台词：它要单独成气泡，不属于「指令结算」
-  for (const m of clean.matchAll(SAY_RE)) {
-    const [full, body] = m;
-    const parsed = parseSayBody(body);
-    if (parsed) says.push(parsed);
-    clean = clean.replace(full, '');
-  }
-
-  for (const m of clean.matchAll(DIRECTIVE_RE)) {
-    const [full, type, bodyRaw] = m;
+  const npcActivity = [];
+  const clean = String(text ?? '').replace(DIRECTIVE_RE, (full, type, bodyRaw) => {
+    if (type === 'SAY') {
+      const speech = parseSayBody(bodyRaw);
+      if (speech) {
+        says.push(speech);
+        npcActivity.push({ type, ...speech });
+      }
+      return '';
+    }
     const body = bodyRaw.trim();
     const parts = body.split('|').map((s) => s.trim());
 
@@ -97,11 +95,13 @@ export function parseDirectives(text) {
       }
     }
 
-    directives.push({ type, head: finalHead, opts: finalOpts, raw: full });
-    clean = clean.replace(full, '');
-  }
+    const directive = { type, head: finalHead, opts: finalOpts, raw: full };
+    directives.push(directive);
+    if (type === 'NPC' || type === 'SCENE' || type === 'END') npcActivity.push(directive);
+    return '';
+  });
 
-  return { directives, clean: cleanNarrationProse(clean), says };
+  return { directives, clean: cleanNarrationProse(clean), says, npcActivity };
 }
 
 /** 难度 → 技能值调整 */

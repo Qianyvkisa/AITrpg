@@ -14,6 +14,7 @@ import { incapacity, partyEnding } from './vitals.js';
 import { compactHistory, DEFAULT_HISTORY_BUDGET } from './contextBudget.js';
 import { rememberInvestigation, selectInvestigation, selectModuleText } from './investigation.js';
 import { checkModuleReply, describeModuleProgress, readModuleGuide } from './moduleGuide.js';
+import { describeNpcRoster, recordNpcActivity } from './npcs.js';
 
 /** 单轮最多自动续跑几次，防止 AI 反复请求检定导致无限循环 */
 const MAX_CHAIN = 3;
@@ -128,6 +129,8 @@ export class GameEngine {
       moduleProgress: describeModuleProgress(guide, s.scenario.scene),
       moduleCorrection: correction || s.keeperContinuation?.moduleCorrection,
       investigation: selectInvestigation(s.scenario, focus),
+      investigatorNames: [s.playerChar, ...s.teammates].filter(Boolean).map((ch) => ch.name),
+      npcRoster: describeNpcRoster(s.scenario.npcs, s.scenario.scene, focus),
       scenario: s.scenario,
       playerChar,
       guests: guests.map((t) => characterToPrompt({ ...t, isPlayer: true }, { full: true })),
@@ -311,6 +314,8 @@ export class GameEngine {
     s.keeperContinuation = null;
 
     const { directives, clean, says } = parsed;
+    const scene = s.scenario.scene;
+    const npcChanged = recordNpcActivity(s, parsed.npcActivity, scene);
     // 切成旁白 / NPC 台词片段，渲染层按它拆气泡
     const settled = { text: res.text, clean, directives, says, segments: splitNarration(res.text), streaming: false };
     const msg = live ? Object.assign(live, settled) : this.pushMessage({ role: 'keeper', ...settled });
@@ -320,11 +325,13 @@ export class GameEngine {
     }
 
     // 同一条消息里的指令只结算一次（防止重复扣血 / 扣 SAN）
-    const scene = s.scenario.scene;
     const clueCount = s.scenario.clues.length;
-    if (directives.length && !msg.resolved) {
+    const gameDirectives = directives.filter((directive) => directive.type !== 'NPC');
+    if (gameDirectives.length && !msg.resolved) {
       msg.resolved = true;
-      await this.resolveDirectives(directives);
+      await this.resolveDirectives(gameDirectives);
+    } else if (npcChanged) {
+      this.emit({ type: 'state-changed' });
     }
     const action = s.messages.findLast((message) => message.role === 'user' && !message.hidden)?.text;
     rememberInvestigation(s.scenario, scene, msg, s.scenario.clues.slice(clueCount), action);

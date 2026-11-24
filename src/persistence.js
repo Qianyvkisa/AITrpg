@@ -3,6 +3,9 @@
 // 只依赖 state 对象，不碰 DOM
 // ---------------------------------------------------------------------------
 import { restoreInvestigation } from './core/investigation.js';
+import { restoreOpening } from './core/builtinModules.js';
+import { openingSceneFor } from './core/moduleGuide.js';
+import { restoreNpcRoster } from './core/npcs.js';
 
 /**
  * 算「推进了几轮」。
@@ -56,7 +59,7 @@ export function applySnapshot(state, snapshot) {
   // 老存档没有伙伴这一层，给空数组兜底
   state.companions = Array.isArray(s.companions) ? s.companions : [];
   state.messages = s.messages || [];
-  state.scenario = s.scenario || state.scenario;
+  state.scenario = { ...(s.scenario || state.scenario) };
   if (!Array.isArray(state.scenario.investigation)) {
     state.scenario = { ...state.scenario, investigation: restoreInvestigation(state.messages, s.module?.scene) };
   }
@@ -65,6 +68,10 @@ export function applySnapshot(state, snapshot) {
   state.turnActorId = s.turnActorId || '';
   state.module = s.module || null;
   state.mode = s.mode || 'player';
+  state.messages = restoreOpening(state.messages, state.module, state.mode, state.teammates);
+  if (!Array.isArray(s.scenario?.npcs)) {
+    restoreNpcRoster(state, state.module ? openingSceneFor(state.module) : state.scenario.scene);
+  }
   state.turns = s.turns ?? (state.messages || []).filter((m) => m.role === 'user').length;
   state.tone = s.tone || '经典恐怖';
   // 旧存档没有这两个字段，用默认值兜底（保持开启，别让老存档突然变哑巴）

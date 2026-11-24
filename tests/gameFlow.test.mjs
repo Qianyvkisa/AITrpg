@@ -32,6 +32,93 @@ function createEngine(state, respond) {
 
 const storedSnapshot = (state) => JSON.parse(JSON.stringify(buildSnapshot(state)));
 
+test('旁观开场使用实际名单，并修正旧档中写死的三位调查员', () => {
+  const [module] = BUILTIN_MODULES;
+  const whiteHeron = createCharacter({ name: '白鹭' });
+  const guide = createCharacter({ name: '周砚' });
+  const old = '深夜，三位调查员在朋友的旧宅里整理遗物。窗外雨声绵密，灯忽明忽暗。';
+  const messages = [
+    { id: 'welcome', role: 'keeper', text: old, clean: old },
+    { id: 'later', role: 'keeper', text: '书房里另一个人翻开账本。' }
+  ];
+  const state = createInitialState();
+  applySnapshot(state, {
+    mode: 'spectator', module: { ...module, openingSpectator: old },
+    teammates: [whiteHeron], messages, scenario: { scene: module.scene }
+  });
+  assert.match(state.messages[0].text, /白鹭在朋友的旧宅里整理遗物/);
+  assert.doesNotMatch(state.messages[0].text, /三位|走在最后/);
+  assert.equal(state.messages[0].text, state.messages[0].clean);
+  assert.equal(state.messages[1].text, messages[1].text);
+  assert.match(openingFor(module, 'spectator', [whiteHeron, guide]), /白鹭、周砚在/);
+  assert.match(openingFor(null, 'spectator', [whiteHeron]), /白鹭刚刚坐下/);
+  assert.equal(openingFor(module, 'player', [whiteHeron]), module.opening);
+});
+
+test('人物档案只接纳定稿，按场景与称呼更新，并分开玩家视图和守密人笔记', async () => {
+  const state = createInitialState();
+  state.mode = 'spectator';
+  state.module = { raw: '场景流程：书房 → 门厅' };
+  state.scenario.scene = '书房';
+  state.teammates = [createCharacter({ name: '白鹭' })];
+  state.companions = [createCharacter({ name: '周砚' })];
+  const prompts = [];
+  const replies = [
+    '越过门厅。[[NPC: 不应入档的人 | 状态=在场]][[SCENE: 阁楼]]',
+    '书房翻账本的人合上了本子。[[NPC: 书房翻账本的人 | 状态=在场 | 公开=正在翻账本]]' +
+      '[[NPC: 藏在暗处的人 | 状态=未登场 | 守密人=可能会来收账]]' +
+      '[[SAY: 白鹭 | 等一下。]][[SAY: 周砚 | 我在这里。]]',
+    '翻账本的人把钥匙放下。[[SAY: 书房翻账本的人 | 我叫玛莎。]]' +
+      '[[NPC: 玛莎 | 原称=书房翻账本的人 | 身份=旧宅管家 | 状态=离场 | 公开=留下了一把钥匙 | 守密人=心里仍有戒备]]' +
+      '[[SCENE: 门厅]][[SAY: 门房 | 您来了。]]'
+  ];
+  const engine = createEngine(state, async ({ messages }) => {
+    prompts.push(messages[0].content);
+    return { ok: true, text: replies.shift() };
+  });
+  assert.equal(await engine.runKeeper(), true);
+  assert.equal(await engine.runKeeper(), true);
+  assert.match(prompts[0], /队伍共 1 人（含联机调查员）：白鹭/);
+  assert.doesNotMatch(prompts[2], /不应入档的人/);
+  assert.match(prompts[2], /书房翻账本的人/);
+  assert.match(prompts[2], /可能会来收账/);
+  assert.deepEqual(state.scenario.npcs.map((npc) => npc.name), ['门房', '玛莎', '藏在暗处的人']);
+  const [doorman, martha] = state.scenario.npcs;
+  assert.equal(doorman.scene, '门厅');
+  assert.equal(martha.scene, '书房');
+  assert.equal(martha.status, '离场');
+  assert.equal(martha.lastLine, '我叫玛莎。');
+  assert.deepEqual(martha.aliases, ['书房翻账本的人']);
+
+  const restored = createInitialState();
+  applySnapshot(restored, storedSnapshot(state));
+  assert.deepEqual(restored.scenario.npcs, state.scenario.npcs);
+  const payload = publicRoomState(restored, { ready: true, busy: false });
+  assert.deepEqual(payload.scenario.npcs.map((npc) => npc.name), ['门房', '玛莎']);
+  assert.equal(payload.scenario.npcs[1].publicNote, '留下了一把钥匙');
+  assert.doesNotMatch(JSON.stringify(payload), /藏在暗处的人|可能会来收账|仍有戒备/);
+  assert.doesNotMatch(JSON.stringify(publicMessage(state, state.messages.at(-1))), /守密人=|仍有戒备/);
+  const guest = createInitialState();
+  applyRoomState(guest, payload);
+  assert.deepEqual(guest.scenario.npcs, payload.scenario.npcs);
+});
+
+test('旧档从明确的 NPC 台词恢复人物，忽略含糊旁白和调查员的台词', () => {
+  const state = createInitialState();
+  applySnapshot(state, {
+    teammates: [createCharacter({ name: '白鹭' })],
+    scenario: { scene: '旧宅书房' },
+    messages: [
+      { role: 'keeper', text: '书房里另一个人翻开账本。' },
+      { role: 'keeper', text: '[[SAY: 白鹭 | 怎么回事？]][[SAY: NPC·管家 | 别开门。]]' },
+      { role: 'scene', text: '【场景】门厅' },
+      { role: 'keeper', segments: [{ kind: 'say', name: '门房', text: '请往这边走。' }] }
+    ]
+  });
+  assert.deepEqual(state.scenario.npcs.map(({ name, scene }) => [name, scene]),
+    [['门房', '门厅'], ['管家', '旧宅书房']]);
+});
+
 test('停止等待后拒绝迟到的守密人回复，继续使用原行动', async () => {
   const state = createInitialState();
   state.module = { raw: '场景流程：书房 → 门厅' };

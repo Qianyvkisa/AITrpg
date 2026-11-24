@@ -16,6 +16,7 @@ export function createInitialState() {
       events: [],
       clues: [],
       investigation: [],
+      npcs: [],
       secrets: [],
       notes: '',
       ended: false,

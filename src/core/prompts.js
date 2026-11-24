@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 
 /** KP 系统提示词 */
-export function keeperSystemPrompt({ module, moduleReference, moduleProgress, moduleCorrection, scenario, investigation, playerChar, guests = [], actingInvestigator, teammates, companions, tone, mode, teammateAutonomous }) {
+export function keeperSystemPrompt({ module, moduleReference, moduleProgress, moduleCorrection, scenario, investigation, investigatorNames, npcRoster, playerChar, guests = [], actingInvestigator, teammates, companions, tone, mode, teammateAutonomous }) {
   const toneMap = {
     '经典恐怖': '阴森、压抑、克苏鲁式的宇宙恐惧。不要写血腥猎奇，要写"不该存在的合理感"。',
     '调查悬疑': '偏推理、线索导向，恐怖感克制，让玩家靠逻辑推进。',
@@ -123,6 +123,19 @@ ${module}
 ${scenario.notes ? '备注：' + scenario.notes : ''}`);
   }
 
+  if (investigatorNames) parts.push(`
+# 调查员名单
+本局队伍共 ${investigatorNames.length} 人（含联机调查员）：${investigatorNames.join('、') || '无'}。
+以此名单为准，禁止补写未配置的调查员或把剧情 NPC 算进队伍。独行时用该调查员的名字，不写「另一位调查员」。`);
+
+  parts.push(`
+# 剧情人物档案
+${npcRoster || '暂无档案。'}
+在场的 NPC 可以按各自目的做事、回应或离开。需要某人参与时，先根据当前地点和上次状态交代其行动；离场、失联或死亡的人不能无故出现。沿用已登记的称呼。声音或传闻不能当作某人亲自到场。
+有剧情作用的人首次出现时，用独立的动作或台词让读者认出他，并在同一轮登记。姓名未知时用稳定的可见称呼（如「书房翻账本的人」），不要用「另一个人」。有模组时优先用原稿已有的 NPC。
+用 [[NPC: 称呼 | 状态=在场 | 身份=已揭示的身份 | 公开=本轮可见的事实]] 登记或更新。后续只填变动字段。状态可用「未登场、已提及、在场、离场、失联、死亡」。换场时可用「地点=场景名」。确认原称与姓名属于同一人时用「原称=先前称呼」合并。
+「公开」更新时保留仍有用的已知事实。未公开的动机、计划和秘密只写「守密人=…」，不要写在身份或公开字段里。幕后人物用「状态=未登场」保留；只有玩家得知或遇见时才改成「已提及」或「在场」。档案随正文附上，无变化时无需重复登记。`);
+
   if (investigation) parts.push(`
 # 相关调查记录
 下面是先前场景、线索和对话的摘录。保留已确认的事实和未兑现的约定，区分 NPC 的陈述与已验证的事实。
@@ -150,7 +163,7 @@ ${mode === 'spectator' ? '玩家暂时旁观。保留这位调查员的状态与
       : '';
     parts.push(`
 # 旁观模式（重要）
-${playerChar ? '主玩家目前旁观，保持联机玩家对自己的调查员的控制。' : '这一局没有玩家扮演的角色。'}${(teammates && teammates.length && teammateAutonomous) ? '队友之外的 NPC 调查员由你驱动。' : '由你驱动能行动的 NPC 调查员。'}
+${playerChar ? '主玩家目前旁观，保持联机玩家对自己的调查员的控制。' : '主机处于旁观模式。'}${teammateAutonomous ? '你负责剧情 NPC 的行动与台词。' : '由你驱动能行动的 NPC 调查员，仅限上方名单中的 AI 调查员，并扮演剧情 NPC。'}
 ${matesLine}- 你自己写你负责的那些角色的行动和台词，包括他们做的决定、掷骰的理由。
 - 不要向"玩家"提问、不要等待玩家行动，要主动把故事往前推。
 - 每次推进都让局势发生实质变化，像在讲一个有始有终的故事。
